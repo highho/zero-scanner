@@ -1,0 +1,44 @@
+# Rust / cargo build artifacts
+/app/target/
+
+# Local cargo config pins machine-specific toolchain paths (rustc/MSVC).
+# It would break builds on other machines, so it is not committed.
+/app/.cargo/
+
+# Local build helper scripts referencing this machine's toolchain paths
+/app/build.ps1
+/app/probe*.ps1
+
+# Build / verification logs
+*.log
+
+# Release binaries are published as GitHub Release assets, not in the repo
+/dist/
+
+# Local scratch files and test fixtures
+/inbox/
+/usage.json
+/build-activity.log
+/craft.json
+/feed.json
+/capture/
+/investigation.cany/
+
+# Root-level UI screenshots (app/shots holds the curated ones)
+/symbols.png
+/symbols2.png
+/list.png
+/inject.png
+/asm.png
+/table.png
+/speed.png
+/script.png
+
+# Agent / harness session state
+/.dsh-meow/
+.dsh-
+
+# Windows / editor noise
+Thumbs.db
+.DS_Store
+*.user

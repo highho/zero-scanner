@@ -1,0 +1,30 @@
+[package]
+name = "zero-scanner"
+version = "0.1.0"
+edition = "2021"
+description = "Zero - a modern, smart memory scanning workspace"
+
+[dependencies]
+eframe = { version = "0.27.2", default-features = false, features = ["glow", "default_fonts", "wayland", "x11"] }
+egui = "0.27.2"
+image = { version = "0.24", default-features = false, features = ["png"] }
+mlua = { version = "0.9", features = ["lua54", "vendored"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.52", features = [
+  "Win32_Foundation",
+  "Win32_Security",
+  "Win32_System_Diagnostics_Debug",
+  "Win32_System_Diagnostics_ToolHelp",
+  "Win32_System_Threading",
+  "Win32_System_Memory",
+  "Win32_System_ProcessStatus",
+  "Win32_UI_Shell",
+  "Win32_UI_WindowsAndMessaging",
+] }
+
+[profile.release]
+opt-level = 2
+lto = false
