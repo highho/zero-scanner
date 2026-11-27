@@ -94,13 +94,15 @@
 
 不做云端大脑，只做一条**能在本机验证**的闭环：
 
-```mermaid
-flowchart LR
-    A["扫描命中<br/>几百个地址"] --> B["分诊打分<br/>每条给理由"]
-    B --> C["观察队列<br/>谁真的在动"]
-    C --> D["你标记「不是它」"]
-    D --> E["提炼可泛化特征"]
-    E --> B
+```text
+扫描命中（几百个地址）
+   ↓  证据打分
+分诊排序（每条带理由）
+   ↓  动态采样
+观察队列（谁真的在动）
+   ↓  你标记「不是它」
+反馈学习（提炼可泛化特征）
+   ↺  回到分诊
 ```
 
 - **证据排序**：先按目标内存的证据（区域权限、模块归属、引用密度）排序，让你从最像的开始看。
@@ -195,21 +197,16 @@ MCP listening on http://127.0.0.1:3780/mcp?token=9f2c1d...（32 位随机串）
 
 ## 架构
 
-```mermaid
-flowchart TB
-    UI["ui.rs · 14 个工作区"] --> APP["app.rs · 状态与业务"]
-    MCP["mcp.rs · 本机 MCP 服务<br/>独立引擎会话"] --> APP
+界面、业务、引擎三层分开，所有能力都收敛到同一个进程访问层：
 
-    APP --> S["扫描 · scan / aob / pointerscan"]
-    APP --> A["分析 · syms / disasm / triage"]
-    APP --> M["修改 · inj / assembler / speed / lua / ctable"]
-    APP --> O["观测 · focus 后台采样"]
-
-    S --> W["winmem.rs · 进程句柄 / 内存读写 / 模块枚举"]
-    A --> W
-    M --> W
-    O --> W
-```
+| 层 | 模块 | 职责 |
+| --- | --- | --- |
+| 界面 | `ui.rs` · `theme.rs` | 14 个工作区与设计系统 |
+| 业务 | `app.rs` | 状态、流程编排、事件分发 |
+| 引擎 | `scan` `aob` `pointerscan` `syms` `disasm` `assembler` `inj` `speed` `lua` `ctable` | 每项能力一个独立模块，互不越界 |
+| 智能 | `triage` `focus` `smart` | 证据打分、观察队列、本机建议 |
+| 底座 | `winmem.rs` | 进程句柄、内存读写、模块枚举 |
+| 对外 | `mcp.rs` | 本机 HTTP MCP 服务（独立引擎会话） |
 
 依赖只有 `eframe` / `egui` 0.27、`mlua`（Lua 5.4，vendored）、`serde`、`windows-sys`。反汇编器、汇编器、CT 解析、MCP 服务全部手写——**没有异步运行时，也没有 iced-x86 / capstone / tokio**。
 
