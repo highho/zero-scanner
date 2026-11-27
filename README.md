@@ -1,87 +1,301 @@
+<div align="center">
+
 # Zero
 
-一个现代、智能的内存扫描工作台。用 Rust + egui 重写的 Cheat Engine 思路实现，**本机推理、不联网、不上传**。
+**现代、轻量的内存工作台 —— 本机推理，不联网，不上传**
 
-## 快速开始
+扫描 → 定位 → 观察 → 修改，一条干净的桌面工作流。
+用 Rust + egui 重写 Cheat Engine 的思路，纯自研，不含 CE 源码。
 
-双击 `zero-scanner.exe` 启动。
+[![Release](https://img.shields.io/github/v/release/highho/zero-scanner?style=flat-square&color=4c8dff)](https://github.com/highho/zero-scanner/releases/latest)
+[![Platform](https://img.shields.io/badge/platform-Windows%2010%2F11%20x64-0078D6?style=flat-square&logo=windows11&logoColor=white)](#下载)
+[![Rust](https://img.shields.io/badge/Rust-2021-000000?style=flat-square&logo=rust&logoColor=white)](#从源码构建)
+[![egui](https://img.shields.io/badge/egui-0.27-1f4257?style=flat-square)](#架构)
+[![Single file](https://img.shields.io/badge/单文件-6.4%20MB-2ea44f?style=flat-square)](#下载)
+[![Offline](https://img.shields.io/badge/推理-本机-brightgreen?style=flat-square)](#智能化闭环)
 
-**给 AI 用（MCP 服务）**：命令行加端口参数启动，
+[下载](#下载) · [快速上手](#快速上手) · [功能](#功能) · [MCP 服务](#给-ai-用mcp-服务) · [架构](#架构) · [构建](#从源码构建) · [安全原则](#安全原则)
 
+</div>
+
+---
+
+## 下载
+
+| 文件 | 说明 |
+| --- | --- |
+| [`zero-scanner.exe`](https://github.com/highho/zero-scanner/releases/latest) | 便携版，单文件，双击即用 |
+| [`zero-scanner-v1.0.0-windows.zip`](https://github.com/highho/zero-scanner/releases/latest) | 同一份 exe + 随包说明 |
+
+- **免安装、无外部运行时**：Lua 5.4 通过 `mlua` 的 vendored feature 静态编进二进制，不需要另装 Lua，也不用装任何运行库。
+- **只支持 Windows 10 / 11 x64**。
+- 权限要跟得上目标：游戏以管理员身份运行时，Zero 也要以管理员身份运行，否则打不开进程。
+
+## 快速上手
+
+```text
+1. 双击 zero-scanner.exe
+2. Ctrl+O 选择进程 —— 或者直接进「练习靶场」，不碰真游戏也能把整套流程走一遍
+3. 输入你在游戏里看到的数值，Ctrl+Enter 首次扫描
+4. 回游戏让数值变化，F5 再次扫描，反复几次，候选就只剩个位数
+5. 加入地址列表，锁定或改写 —— 每一次写入都留了撤销路径
 ```
-zero-scanner.exe --mcp 3780
-```
 
-启动后打印一行地址，形如：
+第一次用建议先开练习靶场：它自带已知的内存布局（金币、血量、指针链、AOB 标记），可以放心改坏。
 
-```
-MCP listening on http://127.0.0.1:3780/mcp?token=xxxx
-```
+## 功能
 
-把这个 URL 填进 MCP 客户端即可。服务只监听本机，**不带 token 的请求一律 401**，关闭时端口完全不监听。
-
-## 主要功能
+### 扫描与定位
 
 | 功能 | 说明 |
-|---|---|
-| 数值扫描 | 精确值 / 模糊值 / 字符串，按可写区收窄，结果分诊排序 |
-| 指针扫描 | 从已知地址反推稳定指针链 |
-| AOB | 按字节模式搜索 |
-| 模块枚举 / 符号解析 | 模块表、导入表、导出表 |
-| 反汇编 | 反汇编目标进程代码 |
-| 代码补丁 / 代码洞 | 可逆写入，支持逐条撤销 |
-| 自动汇编 | 汇编 x86-64 指令并做往返校验 |
-| CT 表格 | 读写 Cheat Engine 的 .ct 文件 |
-| 变速齿轮 | 挂起/恢复目标线程，0.1x-10x |
-| Lua 脚本 | 直接读写目标进程的 CE 风格脚本 |
-| 观察队列 | 后台采样，看哪个地址真的在动 |
-| 反馈学习 | 标记「不是它」，学特征、重排序 |
-| 工作区持久化 | 扫描结果、补丁、地址列表随配置保存 |
+| --- | --- |
+| 数值扫描 | 9 种方式：精确值 / 大于 / 小于 / 区间 / 未知初值 / 增加 / 减少 / 变化 / 未变；支持 1-2-4-8 字节、单双精度浮点与字符串 |
+| 快速扫描 | 按 4 字节对齐扫全进程，速度快到可以当第一遍粗筛 |
+| 指针扫描 | 从一个地址反推「模块基址 + 若干偏移」的稳定链，重启后依然有效 |
+| AOB 扫描 | 按字节特征找代码（支持 `??` 通配），定位到更新数值的那段指令 |
+| 练习靶场 | 内置目标进程，离线练手，不需要真游戏 |
 
-## MCP 工具（14 个）
+### 分析
 
-**连接**：`zero_attach` · `zero_status`
-**扫描**：`zero_scan` · `zero_next_scan` · `zero_candidates`
-**分析**：`zero_pointer_scan` · `zero_disassemble`
-**内存**：`zero_read_memory` · `zero_write_memory` · `zero_undo`
-**观察**：`zero_watch`（会话式：`action=start/status/stop`）
-**表格与脚本**：`zero_ct_table` · `zero_lua`
-**地址**：`zero_add_address`
+| 功能 | 说明 |
+| --- | --- |
+| 符号解析 | 模块列表 + PE 导入表 / 导出表 |
+| 内存浏览 | 按模块分区查看、跳转、跟随指针 |
+| 反汇编 | 自带 x86-64 反汇编器，指令边界与长度精确到字节 |
+| 命中分诊 | 每个候选都带**可解释**的打分理由（是否可写、是否落在模块内、被引用的次数……），不是黑箱分数 |
+
+### 修改（全部可还原）
+
+| 功能 | 说明 |
+| --- | --- |
+| 代码补丁 / 代码洞 | 写前读原字节、抬高页保护、写后恢复；每条可单独撤销，也能一键全撤 |
+| 自动汇编 | 手写 x86-64 汇编，编完做一次往返校验，对不上就不写 |
+| 变速齿轮 | 挂起 / 恢复目标线程，0.1x–10x；停过的线程保证会被放回去 |
+| Lua 脚本 | CE 风格脚本：`readInteger` / `writeInteger` / `readBytes` / `writeBytes` / `getAddress` / `print` |
+| CT 表格 | 读写 Cheat Engine 的 `.ct`，支持指针链地址解析 |
+
+### 观测与智能化
+
+| 功能 | 说明 |
+| --- | --- |
+| 观察队列 | 后台连续采样，回答「到底哪个地址在跟着我动」 |
+| 反馈学习 | 标记「不是它」，从拒绝里提炼可泛化的特征，下次扫描直接把它排到后面 |
+| 智能助手 | 本机规则给出下一步建议与诊断，不联网、不调用大模型 |
+
+### 工作流
+
+| 功能 | 说明 |
+| --- | --- |
+| 14 个工作区 | 扫描 / 地址列表 / 内存浏览 / 智能助手 / 练习靶场 / 指针扫描 / AOB 扫描 / 符号解析 / 反汇编 / 代码补丁 / 自动汇编 / CT 表格 / 变速齿轮 / Lua 脚本 |
+| 工作区持久化 | 地址列表、补丁记录、观察候选与设置存在 exe 旁的 `zero-workspace.json`；文件损坏时降级为空，不会挡住启动 |
+| 快捷键 | 沿用 CE 的肌肉记忆：F5 再次扫描、Ctrl+Z 撤销、Ctrl+F 全部锁定……F1 呼出速查 |
+
+## 智能化闭环
+
+不做云端大脑，只做一条**能在本机验证**的闭环：
+
+```mermaid
+flowchart LR
+    A["扫描命中<br/>几百个地址"] --> B["分诊打分<br/>每条给理由"]
+    B --> C["观察队列<br/>谁真的在动"]
+    C --> D["你标记「不是它」"]
+    D --> E["提炼可泛化特征"]
+    E --> B
+```
+
+- **证据排序**：先按目标内存的证据（区域权限、模块归属、引用密度）排序，让你从最像的开始看。
+- **观察判定**：猜不准就交给时间——后台采样，看数值是否随操作变化。
+- **反馈学习**：拒绝也要学到东西；同一条特征重复拒绝只记一次，不叠加惩罚。
+
+## 给 AI 用：MCP 服务
+
+Zero 可以把自己的引擎通过 MCP 暴露给本机的 AI 助手：**开就监听，关就一个端口都不占**。
+
+两种开法：
+
+- 界面里打开「设置 → MCP 服务」开关；
+- 命令行起一个无界面的引擎：`zero-scanner.exe --mcp 3780`
+
+启动后打印的就是要粘给客户端的地址：
+
+```text
+MCP listening on http://127.0.0.1:3780/mcp?token=9f2c1d...（32 位随机串）
+```
+
+- 传输：MCP over HTTP（JSON-RPC 2.0），请求 `POST /mcp?token=...`，`GET` 是健康检查。
+- 不带 token 或 token 不对：一律 `401`。服务只监听 `127.0.0.1`，不对外。
+- 服务自持一个**独立引擎会话**（自己的进程句柄、扫描状态、补丁账本），不和 GUI 共享可变状态。
+
+### 14 个工具
+
+| 分类 | 工具 | 能做什么 |
+| --- | --- | --- |
+| 连接 | `zero_attach` | 按 PID 或进程名连上一个正在运行的进程 |
+| 连接 | `zero_status` | 当前连接、候选数量、已保存地址 |
+| 扫描 | `zero_scan` | 首次扫描，返回候选数量与最可能的几个地址 |
+| 扫描 | `zero_next_scan` | 在已有结果上再次扫描，用变化方向收窄 |
+| 扫描 | `zero_candidates` | 按可信度列出候选，附打分理由 |
+| 分析 | `zero_pointer_scan` | 为地址反推稳定指针链（模块基址 + 偏移） |
+| 分析 | `zero_disassemble` | 反汇编一段代码：地址、字节、助记符 |
+| 内存 | `zero_read_memory` | 读目标内存 |
+| 内存 | `zero_write_memory` | 写目标内存，返回 undo 句柄 |
+| 内存 | `zero_undo` | 还原本会话的写入（不带地址全还原，带地址只还原那处） |
+| 观测 | `zero_watch` | 会话式观察队列：`start` 立即返回 → 去游戏里改值 → `status` 看谁跟着动 → `stop` |
+| 表格 | `zero_ct_table` | `.ct` 的 `read` / `write` / `build` |
+| 脚本 | `zero_lua` | 跑 CE 风格 Lua，直接读写目标进程 |
+| 地址 | `zero_add_address` | 把地址加入地址列表 |
+
+### 客户端配置示例
+
+```json
+{
+  "mcpServers": {
+    "zero": {
+      "url": "http://127.0.0.1:3780/mcp?token=<你的 token>"
+    }
+  }
+}
+```
+
+> 支持 Streamable HTTP 的客户端直接填 URL；只认 stdio 的客户端用 `mcp-remote` 之类的桥接一层即可。
+
+### 让它写，也让它还得回来
+
+`zero_write_memory` 成功时返回 undo 句柄；写失败不留半写状态。AI 改过的东西，人和 AI 都能逐条或一键还原。
 
 ## 命令行
 
-```
-zero-scanner.exe                      图形界面
-zero-scanner.exe --mcp <port>          启动 MCP 服务
-zero-scanner.exe --selftest            跑自检（结果写 selftest.log，退出码即结论）
-zero-scanner.exe --screenshot <png> --tab <名称>   渲染某个页面截图
-zero-scanner.exe --verify <pid>        对目标进程做 8 项验证（结果写 verify.log）
-zero-scanner.exe --e2e <pid> <info>    端到端验证
+| 命令 | 作用 |
+| --- | --- |
+| `zero-scanner.exe` | 图形界面 |
+| `zero-scanner.exe --mcp <port>` | 无界面启动 MCP 服务（不写端口默认 3777） |
+| `zero-scanner.exe --selftest` | 跑 109 项自检，结论写 `selftest.log`，退出码即结果 |
+| `zero-scanner.exe --verify <pid>` | 对目标进程做 8 项可用性验证 |
+| `zero-scanner.exe --e2e <pid> [info]` | 23 项端到端验证（配合 `e2e_target.py`） |
+| `zero-scanner.exe --screenshot <png> --tab <名字>` | 渲染某个页面为 PNG（界面回归用） |
+| `zero-scanner.exe --hotkeys` | 启动时展开快捷键速查 |
+| `zero-scanner.exe --settings` | 启动时展开设置 |
+| `zero-scanner.exe --practice-target` | 只跑内置靶场进程 |
+
+`--tab` 取值：`scan` `list` `memory` `assistant` `practice` `ptr` `aob` `symbols` `disasm` `inject` `asm` `table` `speed` `script`。
+
+## 快捷键
+
+| 快捷键 | 动作 |
+| --- | --- |
+| `Ctrl+Enter` | 用当前设置开始扫描 |
+| `F5` | 再次扫描（缩小结果） |
+| `Ctrl+Z` | 撤销上一次扫描 |
+| `Ctrl+F` | 全部锁定 / 全部解锁 |
+| `Ctrl+O` | 选择进程 |
+| `Ctrl+N` | 清空扫描结果 |
+| `F8` | 回到地址列表 |
+| `Ctrl+M` | 在内存中查看选中的结果 |
+| `F1` | 显示 / 隐藏快捷键速查 |
+
+## 架构
+
+```mermaid
+flowchart TB
+    UI["ui.rs · 14 个工作区"] --> APP["app.rs · 状态与业务"]
+    MCP["mcp.rs · 本机 MCP 服务<br/>独立引擎会话"] --> APP
+
+    APP --> S["扫描 · scan / aob / pointerscan"]
+    APP --> A["分析 · syms / disasm / triage"]
+    APP --> M["修改 · inj / assembler / speed / lua / ctable"]
+    APP --> O["观测 · focus 后台采样"]
+
+    S --> W["winmem.rs · 进程句柄 / 内存读写 / 模块枚举"]
+    A --> W
+    M --> W
+    O --> W
 ```
 
-## 构建
+依赖只有 `eframe` / `egui` 0.27、`mlua`（Lua 5.4，vendored）、`serde`、`windows-sys`。反汇编器、汇编器、CT 解析、MCP 服务全部手写——**没有异步运行时，也没有 iced-x86 / capstone / tokio**。
 
-需要 Rust 工具链和 Windows 上的 MSVC 链接器（mlua 使用 vendored feature，Lua 直接编进二进制，无需另装 Lua）：
+<details>
+<summary>目录结构</summary>
 
+```text
+.
+├─ app/
+│  ├─ Cargo.toml
+│  └─ src/
+│     ├─ main.rs         入口与命令行
+│     ├─ app.rs          状态与业务
+│     ├─ ui.rs           全部界面
+│     ├─ theme.rs        设计系统
+│     ├─ scan.rs         数值扫描
+│     ├─ aob.rs          字节特征扫描
+│     ├─ pointerscan.rs  指针链
+│     ├─ syms.rs         PE 导入 / 导出表解析
+│     ├─ disasm.rs       x86-64 反汇编
+│     ├─ assembler.rs    汇编与往返校验
+│     ├─ inj.rs          可逆代码补丁
+│     ├─ winmem.rs       进程、内存读写、模块枚举
+│     ├─ triage.rs       命中分诊（证据打分）
+│     ├─ focus.rs        观察队列
+│     ├─ smart.rs        本机规则助手
+│     ├─ practice.rs     练习靶场
+│     ├─ ctable.rs       CT 表格
+│     ├─ speed.rs        变速齿轮
+│     ├─ lua.rs          Lua 脚本
+│     ├─ session.rs      工作区持久化
+│     ├─ hotkey.rs       快捷键
+│     ├─ mcp.rs          MCP 服务
+│     ├─ selftest.rs     109 项自检
+│     ├─ e2e.rs          端到端验证
+│     └─ model.rs        值类型与扫描类型
+└─ e2e_target.py         端到端测试目标进程
 ```
-cd app
+
+</details>
+
+## 从源码构建
+
+需要 Rust stable 工具链和 Windows 的 MSVC 链接器：
+
+```bash
+git clone https://github.com/highho/zero-scanner.git
+cd zero-scanner/app
 cargo build --release
+# 产物：app/target/release/zero-scanner.exe
 ```
 
-产物为 `app/target/release/zero-scanner.exe`。
+仓库里提交了 `Cargo.lock`，构建结果是可复现的。第一次构建要编 vendored Lua，会比之后慢一些。
 
-## 端到端测试
+## 测试与验证
 
-仓库根目录的 `e2e_target.py` 是一个真实的测试目标进程：它公布自己的金币 / 血量地址、指针链和 AOB 标记，供 `--e2e` 使用。
+两条独立的证据线：**断言管逻辑，截图管渲染**。
 
-```
-python e2e_target.py      # 在后台起一个带已知内存的目标进程
+```bash
+# 109 项自检：扫描 / 指针 / 反汇编 / 补丁 / 汇编 / CT / 分诊 / Lua ……
+zero-scanner.exe --selftest
+
+# 23 项端到端：起一个真实目标进程，把整条链路跑一遍
+python e2e_target.py
 zero-scanner.exe --e2e <pid> e2e_target.info
 ```
 
+`e2e_target.py` 会公布自己的金币 / 血量地址、指针链和 AOB 标记；端到端验证就对这些真实地址读写、打补丁、还原。界面回归用 `--screenshot` 逐页渲染 PNG 比对。
+
 ## 安全原则
 
-- **写入必须可还原**：每次补丁都保存原字节，可逐条撤销。
-- **不杀不属于你的进程**：变速只挂起目标线程，且拒绝对自己进程操作。
-- **不假设可以覆盖**：写文件（如 .ct）前必须显式确认。
+- **写入必须可还原**：每次补丁都先读出原字节，可逐条撤销，也能一键全撤。
+- **不杀不属于你的进程**：变速只挂起目标线程，并且拒绝对自己进程操作；挂起过的线程保证被放回。
+- **不假设可以覆盖**：写文件（如 `.ct`）前必须显式确认。
 - **出错不编结果**：地址解析失败就报错，绝不返回一个假地址。
+- **只读优先**：能只读就不写，需要写的时候先把退路铺好。
+
+## 已知限制
+
+- 只有 Windows x64 版本，没有内核驱动——带内核态反作弊保护的游戏，基本打不开或写不进。
+- 不做 DLL 注入：补丁与代码洞都是"改字节 + 可还原"，不是往目标里塞模块。
+- 目标是**你自己的程序、单机游戏和学习实验**。
+
+## 说明
+
+Zero 是纯自研实现，不包含、也不移植 Cheat Engine 的源码；界面与交互按现代桌面工具的审美重做，快捷键与术语尽量照顾 CE 老用户的手感。
+
+> 仅供学习、研究与调试你自己拥有或获授权调试的程序。把它用在联机游戏或别人的机器上，后果自负。
+

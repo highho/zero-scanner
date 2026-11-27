@@ -16,6 +16,8 @@
 /dist/
 
 # Local scratch files and test fixtures
+/e2e_target.info
+/zero-workspace.json
 /inbox/
 /usage.json
 /build-activity.log
@@ -24,7 +26,8 @@
 /capture/
 /investigation.cany/
 
-# Root-level UI screenshots (app/shots holds the curated ones)
+# UI screenshots are local regression output, never committed
+/app/shots/
 /symbols.png
 /symbols2.png
 /list.png
@@ -39,6 +42,7 @@
 .dsh-
 
 # Windows / editor noise
+CON
 Thumbs.db
 .DS_Store
 *.user
