@@ -1024,6 +1024,38 @@ pub fn run() -> bool {
         );
     }
 
+    // 自动更新的版本比较与资产选择逻辑（纯本地，不联网）。
+    {
+        use crate::update;
+        check!(
+            update::is_newer("1.2.0", "1.1.0"),
+            "update: 1.2.0 is newer than 1.1.0"
+        );
+        check!(
+            !update::is_newer("1.0.0", "1.2.0"),
+            "update: 1.0.0 is not newer than 1.2.0"
+        );
+        check!(
+            !update::is_newer("1.2.0", "1.2.0"),
+            "update: identical versions are not newer"
+        );
+        check!(
+            update::is_newer("v1.10.0", "1.9.9"),
+            "update: v-prefix and double digits compare numerically, not lexically"
+        );
+        check!(
+            update::is_newer("1.2.1", "1.2.0"),
+            "update: patch bump is detected"
+        );
+        check!(
+            !update::is_newer("garbage", "1.2.0"),
+            "update: unparsable tag never claims to be newer"
+        );
+        check!(
+            update::normalize_tag("v1.2.0") == "1.2.0",
+            "update: tag normalization strips the v prefix"
+        );
+    }
     log.push_str(if ok { "\nRESULT: PASS\n" } else { "\nRESULT: FAIL\n" });
     std::fs::write("selftest.log", log).ok();
     ok

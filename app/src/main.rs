@@ -108,14 +108,39 @@ fn main() -> eframe::Result<()> {
             }
         }
     }
-    if let Some(pos) = args.iter().position(|a| a == "--update-download") {
+    let download_any = args.iter().any(|a| a == "--update-download-any");
+    let download_pos = args
+        .iter()
+        .position(|a| a == "--update-download" || a == "--update-download-any");
+    if let Some(pos) = download_pos {
         let dir = args
             .get(pos + 1)
             .map(PathBuf::from)
             .unwrap_or_else(std::env::temp_dir);
-        match update::cli_download(&dir) {
+        match update::cli_download(&dir, download_any) {
             Ok(line) => {
                 println!("{line}");
+                std::process::exit(0);
+            }
+            Err(error) => {
+                eprintln!("{error}");
+                std::process::exit(1);
+            }
+        }
+    }
+    if let Some(pos) = args.iter().position(|a| a == "--update-apply-from") {
+        // 验证专用：用指定文件走一遍「等本进程退出 -> 替换 exe -> 重启」的批处理，
+        // 目标可以是任意路径，便于在临时目录里真跑一遍而不动到当前程序。
+        let source = match args.get(pos + 1) {
+            Some(value) => PathBuf::from(value),
+            None => {
+                eprintln!("--update-apply-from 需要一个文件路径");
+                std::process::exit(2);
+            }
+        };
+        match update::install_and_restart(&source) {
+            Ok(()) => {
+                println!("update script queued for {}", source.display());
                 std::process::exit(0);
             }
             Err(error) => {

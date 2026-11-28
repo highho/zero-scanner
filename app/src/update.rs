@@ -184,11 +184,16 @@ impl Updater {
 
 // ---------------------------------------------------------------- 版本与发布信息
 
-fn normalize(tag: &str) -> String {
+/// 把 tag（如 `v1.2.0`）规整成纯版本号 `1.2.0`。
+pub fn normalize_tag(tag: &str) -> String {
     tag.trim().trim_start_matches(['v', 'V']).to_string()
 }
 
 fn parse_version(text: &str) -> Option<(u64, u64, u64)> {
+    // 自己剥掉 v 前缀：调用方直接传 tag（"v1.2.0"）时也要能解析。
+    // 不剥的话 "v1".parse() 失败 -> 返回 None -> is_newer 恒 false，
+    // 表现是「永远显示已是最新」，属于最不该有的静默失败。
+    let text = text.trim().trim_start_matches(['v', 'V']);
     let mut parts = text.split('.');
     let major = parts.next()?.parse::<u64>().ok()?;
     let minor = parts.next().unwrap_or("0").parse::<u64>().ok()?;
@@ -208,6 +213,21 @@ pub fn is_newer(candidate: &str, current: &str) -> bool {
 }
 
 pub fn fetch_release() -> Result<Option<Release>, String> {
+    let Some(release) = fetch_release_any()? else {
+        return Ok(None);
+    };
+    if !is_newer(&release.version, VERSION) {
+        return Ok(None);
+    }
+    Ok(Some(release))
+}
+
+/// 取仓库最新的发布，不判断它是否比当前版本新。
+///
+/// 正常更新流程用 fetch_release（会过滤掉不比当前新的发布）。这个函数是给
+/// 验证用的：远端版本可能落后于本地开发版，此时下载链路否则永远跑不到，
+/// 而「下载 → 校验字节数 → 改名落地」正是最容易出错、最需要真跑一遍的一段。
+pub fn fetch_release_any() -> Result<Option<Release>, String> {
     let url = format!("{PROXY}https://api.github.com/repos/{REPO}/releases/latest");
     let body = http_get_vec(&url)?;
     let text = String::from_utf8_lossy(&body);
@@ -219,10 +239,7 @@ pub fn fetch_release() -> Result<Option<Release>, String> {
         .and_then(|v| v.as_str())
         .ok_or_else(|| "发布信息里没有 tag_name".to_string())?
         .to_string();
-    let version = normalize(&tag);
-    if !is_newer(&version, VERSION) {
-        return Ok(None);
-    }
+    let version = normalize_tag(&tag);
 
     let notes = json
         .get("body")
@@ -342,12 +359,17 @@ pub fn install_and_restart(new_exe: &Path) -> Result<(), String> {
         return Err("下载文件与当前程序是同一个路径".to_string());
     }
     let pid = std::process::id();
+    // 批处理是被 cmd /C 后台拉起的，它的工作目录不是调用者的目录。
+    // 只要有一个相对路径，move 就会找不到文件，而 >nul 会把错误吞掉，
+    // 表现成「点了更新，什么都没发生」。这里一律转成绝对路径。
+    let new_abs = std::path::absolute(new_exe).map_err(|e| format!("无法解析新文件路径：{e}"))?;
     let dir = std::env::temp_dir().join("zero-update");
     std::fs::create_dir_all(&dir).map_err(|e| format!("无法创建临时目录：{e}"))?;
     let script = dir.join("apply.cmd");
 
     let lines = [
         "@echo off".to_string(),
+        format!("set LOG={}", dir.join("apply.log").display()),
         "ping -n 2 127.0.0.1 >nul".to_string(),
         ":wait".to_string(),
         format!("tasklist /FI \"PID eq {pid}\" 2>nul | find \"{pid}\" >nul"),
@@ -355,9 +377,17 @@ pub fn install_and_restart(new_exe: &Path) -> Result<(), String> {
         "  ping -n 2 127.0.0.1 >nul".to_string(),
         "  goto wait".to_string(),
         ")".to_string(),
-        format!("move /Y \"{}\" \"{}\" >nul 2>&1", new_exe.display(), current.display()),
+        format!("move /Y \"{}\" \"{}\" >> \"%LOG%\" 2>&1", new_abs.display(), current.display()),
+        "if errorlevel 1 (".to_string(),
+        "  echo FAILED >> \"%LOG%\"".to_string(),
+        "  exit /b 1".to_string(),
+        ")".to_string(),
+        "echo OK >> \"%LOG%\"".to_string(),
         format!("start \"\" \"{}\"", current.display()),
-        "del \"%~f0\"".to_string(),
+        "echo STARTED >> \"%LOG%\"".to_string(),
+        // 先 goto 让 cmd 停止读取脚本，再删自己。直接 del 的话，cmd 删完还要
+        // 继续读文件，会报 "The batch file cannot be found."，用户看到会以为更新失败。
+        "(goto) 2>nul & del \"%~f0\"".to_string(),
     ];
     std::fs::write(&script, lines.join("\r\n") + "\r\n")
         .map_err(|e| format!("无法写入更新脚本：{e}"))?;
@@ -421,8 +451,11 @@ pub fn download_for_cli(
 }
 
 /// 命令行自检：真的走一遍下载，把文件放到指定目录，返回落地路径。
-pub fn cli_download(dir: &Path) -> Result<String, String> {
-    let release = fetch_release()?.ok_or_else(|| "已是最新，没有可下载的版本".to_string())?;
+///
+/// any=true 时忽略版本比较，直接下载远端最新发布——用于验证下载链路本身。
+pub fn cli_download(dir: &Path, any: bool) -> Result<String, String> {
+    let found = if any { fetch_release_any()? } else { fetch_release()? };
+    let release = found.ok_or_else(|| "已是最新，没有可下载的版本".to_string())?;
     let (tx, _rx) = std::sync::mpsc::channel();
     let downloaded = download_release(&release, tx)?;
     std::fs::create_dir_all(dir).map_err(|e| format!("无法创建目录：{e}"))?;
