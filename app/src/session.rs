@@ -65,6 +65,27 @@ pub struct SavedTableEntry {
     pub value: Option<String>,
 }
 
+/// One saved pointer map: the target that was scanned plus every chain found.
+///
+/// Chains are stored with a module *name* instead of the live module base, so
+/// the same map can be re-pointed at a fresh process after a restart.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct SavedPointerMap {
+    pub target: u64,
+    pub depth: usize,
+    pub paths: Vec<SavedPointerPath>,
+}
+
+/// A pointer chain flattened for storage.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct SavedPointerPath {
+    pub module: String,
+    pub module_offset: u64,
+    pub offsets: Vec<u64>,
+    /// Final address in the process that produced the map; informational only,
+    /// it is recomputed by rebasing after the map is loaded.
+    pub final_address: u64,
+}
 impl SavedTableEntry {
     pub fn from_ct_entry(entry: &CtEntry) -> Self {
         Self {
@@ -95,6 +116,7 @@ pub struct Workspace {
     pub patches: Vec<SavedPatch>,
     pub table_entries: Vec<SavedTableEntry>,
     pub watches: Vec<SavedWatch>,
+    pub pointer_maps: Vec<SavedPointerMap>,
     pub table_path: String,
     pub script_source: String,
     pub asm_source: String,
@@ -109,6 +131,7 @@ impl Workspace {
             && self.patches.iter().all(|p| !p.active)
             && self.table_entries.is_empty()
             && self.watches.is_empty()
+            && self.pointer_maps.iter().all(|m| m.paths.is_empty())
             && self.script_source.trim().is_empty()
             && self.asm_source.trim().is_empty()
     }

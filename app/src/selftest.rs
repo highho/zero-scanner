@@ -575,6 +575,47 @@ pub fn run() -> bool {
             session::Workspace::default().is_empty(),
             "a blank workspace counts as empty and is not saved"
         );
+        // Pointer maps store the module *name*, never a live base, so the same
+        // map can be re-pointed after a restart. A round-trip must keep them and
+        // they must count as content (otherwise saving silently drops the map).
+        workspace.pointer_maps.push(session::SavedPointerMap {
+            target: 0x1234_5678,
+            depth: 2,
+            paths: vec![session::SavedPointerPath {
+                module: "game.exe".to_string(),
+                module_offset: 0x1A2B,
+                offsets: vec![0x18, 0x30],
+                final_address: 0x7FF6_A1B2_C010,
+            }],
+        });
+        let text = session::to_string(&workspace).expect("serialise pointer map");
+        match session::from_str(&text) {
+            Ok(back) => {
+                let map = back.pointer_maps.first();
+                check!(
+                    map.map(|m| m.paths.len() == 1 && m.depth == 2 && m.target == 0x1234_5678)
+                        .unwrap_or(false),
+                    "pointer map survives the workspace round-trip"
+                );
+                check!(
+                    map.map(|m| {
+                        m.paths[0].module == "game.exe"
+                            && m.paths[0].module_offset == 0x1A2B
+                            && m.paths[0].offsets == vec![0x18, 0x30]
+                    })
+                    .unwrap_or(false),
+                    "a saved chain keeps its module name and offsets"
+                );
+                check!(
+                    !back.is_empty(),
+                    "a workspace holding only a pointer map still counts as content"
+                );
+            }
+            Err(e) => {
+                ok = false;
+                log.push_str(&format!("FAIL  re-parse pointer map: {e}\n"));
+            }
+        }
     }
     // Trainer export: every entry is proven writable and restorable before it
     // is written into the exported table, and the launcher points at this exe.

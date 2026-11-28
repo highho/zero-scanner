@@ -153,6 +153,9 @@ pub struct ZeroApp {
     pub ptr_modules_loaded: bool,
     pub ptr_selected: usize,
     pub ptr_scanned: usize,
+    /// Set when the shown chains came from a saved map and have not been
+    /// re-pointed at the current process yet.
+    pub ptr_stale: bool,
     pub aob_text: String,
     pub aob_job: Option<aob::AobHandle>,
     pub aob_phase: ScanPhase,
@@ -397,6 +400,7 @@ impl ZeroApp {
             ptr_modules_loaded: false,
             ptr_selected: 0,
             ptr_scanned: 0,
+            ptr_stale: false,
             aob_text: String::new(),
             aob_job: None,
             aob_phase: ScanPhase::Idle,
@@ -760,7 +764,6 @@ impl ZeroApp {
             self.mem_data.clear();
             self.ptr_modules.clear();
             self.ptr_modules_loaded = false;
-            self.ptr_paths.clear();
             self.sym_module.clear();
             self.sym_table = None;
             self.sym_error = None;
@@ -776,8 +779,13 @@ impl ZeroApp {
             freeze.handle = Some(handle.clone());
             freeze.specs.clear();
         }
-        self.process = Some(handle);
+        self.process = Some(handle.clone());
         self.picker_open = false;
+        // A restored pointer map is re-pointed here: modules moved with ASLR, so
+        // the stored bases are useless until they are looked up again by name.
+        if self.ptr_stale {
+            self.rebase_ptr_paths(&handle);
+        }
         self.sync_freeze();
         self.toast(
             format!("已连接 {}（PID {}）", self.process_name, self.attached_pid.unwrap_or(0)),
@@ -2117,6 +2125,52 @@ impl ZeroApp {
             previous: None,
         });
         self.toast(format!("已加入：{label}"), ToastKind::Success);
+        self.save_workspace();
+    }
+
+    /// Re-point the chains currently on screen at an attached process.
+    ///
+    /// Chains that no longer resolve are dropped with an explanation rather
+    /// than left showing addresses from a process that is gone.
+    pub fn rebase_ptr_paths(&mut self, handle: &Arc<ProcessHandle>) {
+        if self.ptr_paths.is_empty() {
+            self.ptr_stale = false;
+            return;
+        }
+        let modules = if self.ptr_modules_loaded && !self.ptr_modules.is_empty() {
+            self.ptr_modules.clone()
+        } else {
+            handle.modules()
+        };
+        self.ptr_modules = modules.clone();
+        self.ptr_modules_loaded = true;
+        let mut kept = Vec::with_capacity(self.ptr_paths.len());
+        let mut dropped = 0usize;
+        for path in &self.ptr_paths {
+            match pointerscan::rebase_path(path, &modules, handle) {
+                Some(fresh) => kept.push(fresh),
+                None => dropped += 1,
+            }
+        }
+        let total = self.ptr_paths.len();
+        self.ptr_paths = kept;
+        self.ptr_selected = 0;
+        self.ptr_stale = false;
+        if dropped > 0 {
+            self.toast(
+                format!(
+                    "指针地图已按新基址重映射：{}/{total} 条有效，{dropped} 条失效（模块已换或链路断了）。",
+                    self.ptr_paths.len()
+                ),
+                ToastKind::Warn,
+            );
+        } else {
+            self.toast(
+                format!("指针地图已按新基址重映射：{total} 条全部有效。"),
+                ToastKind::Success,
+            );
+        }
+        self.save_workspace();
     }
 
     pub fn add_aob_hit(&mut self, index: usize) {
@@ -2312,12 +2366,33 @@ impl ZeroApp {
                 score: watch.score,
             })
             .collect();
+        // Pointer chains are saved with the module *name* so they can be
+        // re-pointed at a new process; ptr_target records what they resolve to.
+        let pointer_maps = if self.ptr_paths.is_empty() {
+            Vec::new()
+        } else {
+            vec![session::SavedPointerMap {
+                target: crate::model::parse_address(&self.ptr_target).unwrap_or(0),
+                depth: self.ptr_depth,
+                paths: self
+                    .ptr_paths
+                    .iter()
+                    .map(|path| session::SavedPointerPath {
+                        module: path.base.module.clone(),
+                        module_offset: path.base.offset,
+                        offsets: path.offsets.clone(),
+                        final_address: path.final_address,
+                    })
+                    .collect(),
+            }]
+        };
         session::Workspace {
             version: 1,
             entries,
             patches,
             table_entries,
             watches,
+            pointer_maps,
             table_path: self.ct_path.clone(),
             script_source: self.script_source.clone(),
             asm_source: self.asm_source.clone(),
@@ -2410,6 +2485,30 @@ impl ZeroApp {
                 .collect();
             // Sampling resumes on the next tick once a process is attached.
             self.watch_running = false;
+        }
+        // Pointer maps come back as *stored* chains: the module bases belong to
+        // whatever process produced them, so they are re-pointed on attach.
+        if let Some(map) = workspace.pointer_maps.first() {
+            if !map.paths.is_empty() {
+                self.ptr_depth = map.depth.clamp(1, 8);
+                self.ptr_target = format!("{:X}", map.target);
+                self.ptr_paths = map
+                    .paths
+                    .iter()
+                    .map(|saved| pointerscan::PointerPath {
+                        base: pointerscan::StaticBase {
+                            module: saved.module.clone(),
+                            module_base: 0,
+                            offset: saved.module_offset,
+                        },
+                        offsets: saved.offsets.clone(),
+                        final_address: saved.final_address,
+                        is_32bit: false,
+                    })
+                    .collect();
+                self.ptr_phase = ScanPhase::Idle;
+                self.ptr_stale = true;
+            }
         }
         workspace.active_patches()
     }

@@ -1,0 +1,60 @@
+本段：为 1.4 第 3 项（指针地图存盘）与第 4 项（插件扩展）逐文件读代码，仍未改任何文件。
+
+【app/src/session.rs 全文 208 行】
+- SavedEntry{description,address:u64,vtype:String,frozen,value_text}、SavedPatch{address,original:Vec<u8>,written,label,active}、SavedWatch{address,vtype,description,score}、SavedTableEntry{description,address:String,vtype,value:Option<String>}（from_ct_entry/to_ct_entry，active = value.is_some()）。
+- `#[derive(Clone, Debug, Default, Serialize, Deserialize)] #[serde(default)] pub struct Workspace { version:u32, entries, patches, table_entries, watches, table_path:String, script_source:String, asm_source:String, aob_text:String, scan_value:String, last_tab:String }`（第 90-104 行）。
+- `is_empty()`（107-114）判 entries/patches 全非 active/table_entries/watches/script_source.trim/asm_source.trim；`active_patches()`（118）数 active。
+- `vtype_name(VType)->&'static str`（123）/`vtype_from_name(&str)->VType`（136）；`to_string(&Workspace)`（149）、`from_str`（153）、`save(path,&ws)`（157，std::fs::write）、`load(path)->Workspace`（163，任何失败 unwrap_or_default）。
+- tests（170-207）：round_trip_keeps_patches、corrupt_file_yields_empty_workspace。
+
+【app/src/pointerscan.rs 全文 313 行】
+- 第 8-9 行 const CHUNK: u64 = 128*1024、ALIGNMENT: u64 = 4。
+- 第 13-18 行 `#[derive(Clone, Debug)] pub struct StaticBase { pub module: String, pub module_base: u64, pub offset: u64 }`；`address()`=module_base.saturating_add(offset)；`display()`：offset==0 → `"mod"`，否则 `"mod"+HEX`（带引号）。
+- 第 34-40 行 `#[derive(Clone, Debug)] pub struct PointerPath { pub base: StaticBase, pub offsets: Vec<u64>, pub final_address: u64, pub is_32bit: bool }`；`display()` 每跳 push `" -> +{X}"`（0 也写 `-> +0`）；`depth()`=offsets.len()。**两者都无 serde derive**。
+- 第 60-74 行 PtrHandle{rx:mpsc::Receiver<PtrDone>, progress:Arc<AtomicU64>, total:u64, cancel:Arc<AtomicBool>, started:Instant}；PtrDone{paths, elapsed:Duration, cancelled, truncated, scanned_pointers:u64}。
+- `pub fn start_scan(handle: Arc<ProcessHandle>, regions: Vec<Region>, modules: Vec<ModuleInfo>, target: u64, max_depth: usize, max_offset: u64, max_results: usize) -> Result<PtrHandle,String>`（87 行）。校验：max_depth==0→「层级至少为 1。」；regions 空→「这个进程没有可扫描的内存区域（试试取消「只扫描可写内存」）。」；max_offset==0→「最大偏移至少要为 1。」。pointer_size = is_64bit?8:4；max_offset.min(0x1_0000)。
+- 线程名 "zero-pointer"；Pass1 建 value_map: HashMap<u64,Vec<u64>>；Pass2 反向 BFS `for off in 0..=max_offset { let value = pointed.saturating_sub(off); }`，links: Vec<LevelLinks>；最后 `module_containing(&modules, candidate)` 过滤 + `reconstruct(candidate, depth, &links)` 得到 offsets，构造 PointerPath{base: StaticBase{module: module.name.clone(), module_base: module.base, offset: module.offset_of(candidate)}, offsets, final_address: target, is_32bit: !is_64bit}；排序 depth→module→offset，dedup_by(module+offset+offsets)，truncate(max_results)，truncated = paths.len() >= max_results。
+- 辅助：`fn collect_pointers(buf, base, pointer_size, space, map, scanned)`（246）、`struct AddressSpace{min,max}` + `is_plausible`（276-293）、`fn module_containing<'a>(modules:&'a [ModuleInfo], address:u64)->Option<&'a ModuleInfo>`（295）、`fn reconstruct(base:u64, depth:usize, links:&[LevelLinks])->Option<Vec<u64>>`（301）。
+
+【app/src/app.rs 关键行号与签名】
+- 字段 143-155：ptr_target:String、ptr_depth:usize、ptr_max_offset:u64、ptr_offset_text:String、ptr_job:Option<pointerscan::PtrHandle>、ptr_phase:ScanPhase、ptr_error:Option<String>、ptr_elapsed:Duration、ptr_paths:Vec<pointerscan::PointerPath>、ptr_modules:Vec<ModuleInfo>、ptr_modules_loaded:bool、ptr_selected:usize、ptr_scanned:usize。
+- demo 初始化 450-472：两条 PointerPath（game.exe+0x1A2B → offsets [0x18,0x30] final 0x7FF6_A1B2_C010；game.dll+0x8C → [0x4,0x0] final 0x7FF6_A1B2_C0A4），472 行 ptr_modules_loaded=true。
+- `pub fn attach_handle(&mut self, handle: Arc<ProcessHandle>)`（747）：`let same = self.attached_pid == Some(handle.pid);` 不同 pid 才清 hits/hit_history/entries/selected_hit/mem_*/ptr_modules/ptr_modules_loaded/**ptr_paths**/sym_*；末尾 process=Some(handle)、sync_freeze()、toast。**指针地图重映射挂这里**。
+- `pub fn detach(&mut self)`（788）：停 dbg、停 scan_job、清 process/attached_pid/…/mem_data，entries 的 current/previous 置 None，**不清 entries 与 ptr_paths**。
+- `pub fn start_ptr_scan(&mut self)`（1903）：要求 process、ptr_target 非空、parse_address 成功；未载入则 handle.modules()；`handle.regions(self.writable_only)`；max_depth=ptr_depth.clamp(1,8)；调 start_scan(handle, regions, ptr_modules.clone(), target, max_depth, ptr_max_offset, self.max_results)；成功时 ptr_paths.clear()、ptr_selected=0、ptr_scanned=0、last_scan_kind=format!("指针 · {max_depth} 层")。
+- `pub fn stop_ptr_scan(&mut self)`（1959）置 cancel；`fn poll_ptr_scan(&mut self, ctx:&egui::Context)`（1965）：try_recv → ptr_paths=result.paths、ptr_scanned、phase=Done；空结果推 smart_msgs「没有找到指向该地址的指针链。试试增加层级、放宽最大偏移，或取消「只扫描可写内存」。」；否则 toast「指针扫描完成：{count} 条链{（已达上限）}，用时 {:.2}s」。
+- `pub fn add_ptr_path(&mut self, index: usize)`（2097）：取 path.final_address/display()，去重（entries 已有同地址 → toast「这个地址已经在列表里了。」），push Entry{desc: format!("指针链 {:016X}", address), vtype: VType::I32, active:false, value_text:"-"}，toast「已加入：{label}」。**没有 save_workspace()**（对照 add_aob_hit 2122-2144 末尾有 self.save_workspace()）。
+- `pub fn apply_preset(&mut self, preset: smart::Preset)`（1740）：vtype/scan_type=Exact/scan_value=preset.value/scan_value2.clear()/tab=Scan/toast「{label}：{value}，{hint}」。
+- 热键处理 `fn`（约 2215-2268）：取 ctrl/shift → 扫 events 找 hotkey::key_char → `hotkey::lookup(ch, ctrl, shift)` → match Action{Scan→start_first_scan, NextScan, Undo, FreezeAll, OpenProcess, ShowList→tab=List, ToggleHelp, ClearResults, ViewMemory}。
+- `pub fn collect_workspace(&self) -> session::Workspace`（2271）：entries/patches/table_entries/watches 映射后 `session::Workspace { version: 1, entries, patches, table_entries, watches, table_path: self.ct_path.clone(), script_source, asm_source, aob_text, scan_value, last_tab: tab_tag(self.tab).to_string() }`（2315-2327）。
+- `pub fn save_workspace(&mut self)`（2331）：is_empty 直接 return，否则 session::save，失败 toast「工作区保存失败：{e}」。
+- `pub fn restore_workspace(&mut self) -> usize`（2343）：session::load → entries（id 从 next_entry_id 递增）/inj_patches/ct_table/script_source/asm_source/aob_text/scan_value/watches（focus::Watch::new，watch_running=false）；末尾返回 workspace.active_patches()。
+- `pub fn run_script(&mut self)`（2417）：script::run_script → 有 patches 则 inj_patches.extend + save_workspace()。
+- app.rs:1592 `match crate::structs::dissect(&handle, &self.ptr_modules, address, self.struct_size)`。
+
+【app/src/ui.rs 指针页 ui_ptr_scan（2175-2323）】
+- 标题「指针扫描」+ 副标题「给一个内存地址，反推它的稳定指针链：模块基址 + 若干偏移。」；右上 status_chip「{n} 条链」。
+- card 1：目标地址输入 280×34（Enter 触发 start_ptr_scan）；最大层级 Slider 1..=6；单级偏移上限输入 130×34（Enter 时 parse_address→ptr_max_offset.min(0x1_0000)）；按钮「开始指针扫描」gradient_button 176 宽 / running 时「停止」。
+- card 2「指针链」：空态「还没有结果。先连接进程、输入一个地址，然后开始扫描。」；每条形如 soft_card 内 path.display()（monospace 13 strong）+ tag「{n} 层」+ tag「{:016X}」final_address + 右侧三个 outline_button「反汇编」「内存中查看」「加入列表」→ 调 jump_to_disasm / open_memory_at / add_ptr_path。
+
+【app/src/theme.rs 可复用 UI helper】
+card_frame()（639）、soft_card()（653）、divider(ui)（661）、section_label(ui,&str)（667）、gradient_button(ui,label,width,enabled)（711）、outline_button(ui,label,enabled)（753）、pill(ui,label,selected)（781）、tag(ui,label,color)（811）、icon_button(ui,IconKind)（822）、status_chip(ui,text,color)（1241）、toast_style(kind)（1224）。颜色：bg/panel/card/border/text/muted/faint/accent/accent_2/warn/danger/success。主题包机制：themes_dir()=prefs::data_dir()/themes、`pub fn register_plugin_pack(path: PathBuf) -> Result<(),String>`（410）、reload()（425）、themes()（431）、pack_errors()（437）。
+
+【app/src/hotkey.rs 全文 94 行】
+- `pub enum Action { Scan, NextScan, Undo, FreezeAll, OpenProcess, ShowList, ToggleHelp, ClearResults, ViewMemory }`。
+- `pub struct Shortcut { pub action: Action, pub key: char, pub ctrl: bool, pub shift: bool, pub label: &'static str, pub description: &'static str }`。
+- `pub const SHORTCUTS: &[Shortcut]`（44-54）9 条：Ctrl+Enter Scan("\r")、F5 NextScan('5')、Ctrl+Z Undo('z')、Ctrl+F FreezeAll('f')、Ctrl+O OpenProcess('o')、Ctrl+N ClearResults('n')、F8 ShowList('8')、Ctrl+M ViewMemory('m')、F1 ToggleHelp('\'')。
+- `pub fn lookup(key:char, ctrl:bool, shift:bool) -> Option<Action>`（60，key 先 to_ascii_lowercase）；`pub fn key_char(egui::Key) -> Option<char>`（72，F1→'\''、F2→'2'、F3→'3'、F4→'4'、F5→'5'…F10→'0'、Enter→'\r'、A..Z→小写）。
+- selftest 480-512 断言 SHORTCUTS 非空、两两不重复、lookup 自洽、F5 映射。ui.rs:4193 遍历 SHORTCUTS 画帮助浮层。
+
+【app/src/smart.rs】`#[derive(Clone, Copy)] pub struct Preset { pub key:&'static str, pub label:&'static str, pub hint:&'static str, pub vtype: VType, pub value:&'static str }`（14-21）；`pub const PRESETS: [Preset; 4]`（23-52）：health/生命值/I32/"100"、ammo/弹药/I32/"30"、coins/金币/I32/"250"、coords/坐标/F32/"0"。ui.rs:788、1933、2019 遍历 PRESETS。
+
+【app/Cargo.toml】version = "1.4.0"（第 3 行）；依赖 eframe/egui 0.27.2、image 0.24(png)、mlua 0.9(lua54,vendored)、serde、serde_json；windows-sys 0.52 features 已含 Win32_Foundation / Networking_WinHttp / Security / Diagnostics_Debug / Diagnostics_ToolHelp / System_Kernel / System_Threading / System_Memory / System_ProcessStatus / System_Console / UI_Shell / UI_WindowsAndMessaging。
+
+【winmem 复用接口】`pub fn read_pointer(&self, address: u64) -> Option<u64>`（105）、`pub fn modules(&self) -> Vec<ModuleInfo>`（124）。
+
+【本段设计判断（尚未落地）】
+- 指针地图存盘：session.rs 新增 SavedPointerMap{target, depth, created, paths:Vec<SavedPointerPath>} + SavedPointerPath{module, module_offset, offsets:Vec<u64>, final_address}；Workspace 加 pointer_maps 并计入 is_empty；pointerscan.rs 加 `pub fn rebase_path(path:&PointerPath, modules:&[ModuleInfo]) -> Option<PointerPath>`（按 module 名找新基址，按 offsets 逐跳 read_pointer）。
+- 插件扩展：struct_templates 落 structs.rs（StructTemplate + 全局注册表，dissect 先查模板）；game_profiles 落 smart.rs（运行时 preset 列表，apply_preset 消费）。注意 examples 里 alignment/fast_scan/hotkeys 在 app 中无实现，不能假装生效。
+
+Open objectives: 阅读 roadmap 并继续规划开发（m00003）—— 1.4 剩余：指针地图存盘（代码已读完，准备动手）、插件扩展 struct_templates/game_profiles、MCP 可选 +2 工具；已完成 Lua 6→14、3 个 CE 样本、训练器导出 + --apply-table、调试器回归修复。

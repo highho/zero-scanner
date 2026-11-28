@@ -1,5 +1,6 @@
 use crate::model::Region;
 use crate::winmem::{ModuleInfo, ProcessHandle};
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{mpsc, Arc};
@@ -10,7 +11,7 @@ const ALIGNMENT: u64 = 4;
 
 /// Where a pointer chain starts: a module plus a fixed offset (survives ASLR and
 /// restarts) or, as a fallback, the module base itself.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct StaticBase {
     pub module: String,
     pub module_base: u64,
@@ -31,7 +32,7 @@ impl StaticBase {
 }
 
 /// One pointer chain: base -> [offset1, offset2, ...] -> final field.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct PointerPath {
     pub base: StaticBase,
     pub offsets: Vec<u64>,
@@ -296,6 +297,32 @@ fn module_containing<'a>(modules: &'a [ModuleInfo], address: u64) -> Option<&'a 
     modules.iter().find(|m| m.contains(address))
 }
 
+/// Re-point a stored chain at a freshly attached process.
+///
+/// The module is looked up by name (bases move with ASLR), then every hop is
+/// re-read from the live process. Returns None when the module is gone or any
+/// hop no longer dereferences: a stale map must fail loudly, never silently
+/// produce a plausible-but-wrong address.
+pub fn rebase_path(path: &PointerPath, modules: &[ModuleInfo], handle: &ProcessHandle) -> Option<PointerPath> {
+    let wanted = path.base.module.to_ascii_lowercase();
+    let module = modules
+        .iter()
+        .find(|m| m.name.to_ascii_lowercase() == wanted)?;
+    let mut address = module.base.saturating_add(path.base.offset);
+    for offset in &path.offsets {
+        address = handle.read_pointer(address)?.saturating_add(*offset);
+    }
+    Some(PointerPath {
+        base: StaticBase {
+            module: module.name.clone(),
+            module_base: module.base,
+            offset: path.base.offset,
+        },
+        offsets: path.offsets.clone(),
+        final_address: address,
+        is_32bit: !handle.is_64bit,
+    })
+}
 /// Walk the stored links from a base address down to the target, collecting the
 /// per-hop offsets (innermost first, then reversed so the list reads base->target).
 fn reconstruct(base: u64, depth: usize, links: &[LevelLinks]) -> Option<Vec<u64>> {

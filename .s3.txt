@@ -1,0 +1,42 @@
+m01115–m01244 调试器 CONTEXT 对齐根因修复 + 指针地图存盘开工
+
+用户消息 m00003（延续）：「阅读roadmap，继续规划开发」。本段：修掉阻塞验收的调试器回归，提交，开始 1.4 第三项（指针地图存盘）。
+
+【根因定位：CONTEXT 缓冲区 16 字节对齐（已修复并提交）】
+- 现象复现：app 目录下 `ZERO_DBG_TRACE=1 ./target/debug/zero-scanner.exe --dbg-test` → PASS 靶场/已附加，FAIL 写入断点命中 0 次，FAIL detach 无错误 (Some("所有线程都写不进断点（6 个失败）"))。单次运行约 50 秒（含 45 秒 deadline）。
+- dbg_trace.log 揭示关键一行：`apply: thread 3336 suspend=0` 紧接着 `apply: GetThreadContext 3336 failed err=998`，其余 5 个线程 suspend=1 同样 998。即 SuspendThread 成功、GetThreadContext 仍报 998 ERROR_NOACCESS。
+- 根因：`GetThreadContext` / `SetThreadContext` 要求 CONTEXT 缓冲区按 **16 字节对齐**。原代码 `let mut ctx: CONTEXT = std::mem::zeroed();` 是栈上局部变量，编译器只保证 8 字节对齐；栈帧布局随任何无关改动（加一行诊断、改版本号、加一个 cargo feature）变化就可能落到非 16 字节边界 → API 立刻 998。这解释了「换个构建就全不命中、git stash 回去又好了」的诡异现象。
+- 修复（app/src/debugger.rs，替换原 read_context_with / write_context_with 区块，位置约 line 550-590）：新增
+  - `#[repr(C, align(16))] struct AlignedX64(CONTEXT);` 与 `#[repr(C, align(16))] struct AlignedX86(WOW64_CONTEXT);`
+  - `fn x64_get(handle: HANDLE, flags: u32) -> Option<CONTEXT>` / `fn x64_set(handle: HANDLE, flags: u32, ctx: &CONTEXT) -> bool`
+  - `fn x86_get(handle: HANDLE, flags: u32) -> Option<WOW64_CONTEXT>` / `fn x86_set(handle: HANDLE, flags: u32, ctx: &WOW64_CONTEXT) -> bool`
+  - 这四个 helper 内部都先 `let mut holder = AlignedX64(...)` / `AlignedX86(...)` 再取 `&mut holder.0`，把对齐变成类型属性而不是运气。
+  - `read_context_with(handle, is_64bit)` / `write_context_with(handle, is_64bit, ctx)` 改为只做分支转发到上述 helper。
+- 同步把另外两处裸调用改为走 helper：`read_thread_context`（原 CONTEXT_ALL_AMD64 / WOW64_CONTEXT_ALL）改为 `x64_get(handle, CONTEXT_ALL_AMD64).map(SavedCtx::X64)` / `x86_get(...)`，CloseHandle 移到之后；`write_thread_context(_target, thread_id, ctx)` 改为 `write_context_with(handle, _target.is_64bit, ctx)`；`write_thread_context_saved` 签名改为 `fn write_thread_context_saved(is_64bit: bool, thread_id: u32, original: &SavedCtx) -> bool`（目前无调用点，仅为一致性）。
+- 验证：`cargo build` 后 `--dbg-test` 全 PASS —— 靶场已就绪 pid=27348 addr=0x29AC75C5110 / 已附加 / **写入断点命中 3 次** / 命中带 RIP 0x7FF62483EB4E / 命中记录指令字节 / 命中读回写入值 / detach 无错误 (None) / detach 后目标仍存活 / RESULT: PASS。
+- 全量 selftest：**160 PASS / 0 FAIL**，RESULT: PASS（含 9 条 debugger 断言）。
+- 教训：**cargo check 不产出 exe**，改完必须 `cargo build` 再跑测试；否则跑的仍是旧二进制，会误判修复无效。
+- 提交 `a15239e fix(debugger): CONTEXT 缓冲区 16 字节对齐 + 训练器导出与 --apply-table`（含 trainer.rs、Cargo.toml 1.4.0、Win32_System_Console feature、main.rs --apply-table 分支、selftest trainer 断言）。
+
+【1.4 剩余范围（docs/roadmap.md:91-131 原文要点）】
+- 第 3 项 指针地图存盘：PtrDone / PointerPath 序列化到 workspace 的 `pointer_maps` 段；重新加载后按新基址重映射，解析结果与内存中一致（验收）。文件改动表：`app/src/session.rs` pointer_maps 段（约 +80 行）。
+- 第 4 项 插件能力扩展（plugins.rs）：Manifest 新增 `struct_templates`（JSON 描述字段布局，structs.rs 注册，按模块签名匹配）、`game_profiles`（每游戏一套扫描参数 + 热键，落地到 smart::Preset 同构配置）；坏清单跳过并报原因，不阻塞启动。
+- 剩余验收：examples/ 已放 3 个 CE 样本 + structs/unity-player.json + game-profiles/sample-game.json；还差插件字段真正被读取注册、指针地图存盘重载一致。
+
+【已读懂的现有结构（指针地图实现要用）】
+- app/src/session.rs:92 `pub struct Workspace { version: u32, entries: Vec<SavedEntry>, patches: Vec<SavedPatch>, table_entries: Vec<SavedTableEntry>, watches: Vec<SavedWatch>, table_path: String, script_source: String, asm_source: String, aob_text: String, scan_value: String, last_tab: String }`，`#[derive(Clone, Debug, Default, Serialize, Deserialize)]` + `#[serde(default)]`；`is_empty()` 判定 entries/patches(active)/table_entries/watches/script_source/asm_source；`to_string` / `from_str` / `save(path,&ws)` / `load(path)->Workspace`（失败回退 default）；末尾有 `#[cfg(test)] mod tests`（round_trip_keeps_patches、corrupt_file_yields_empty_workspace）。
+- app/src/pointerscan.rs: `pub struct StaticBase { module: String, module_base: u64, offset: u64 }`（`address()`、`display()` 输出 "mod"+OFF）；`pub struct PointerPath { base: StaticBase, offsets: Vec<u64>, final_address: u64, is_32bit: bool }`（`display()` 拼 " -> +X"、`depth()`）；`PtrDone { paths, elapsed, cancelled, truncated, scanned_pointers }`。扫描算法：Pass1 建 value→locations（CHUNK=128K，ALIGNMENT=4，AddressSpace 过滤不可信值）；Pass2 从 target 反向 BFS 逐层 `for off in 0..=max_offset { value = pointed - off }` 找 parents，links[level-1] 存 loc→[(child,value)]；最后对每个可达 candidate 用 `module_containing` 要求落在模块内，`reconstruct(base, depth, links)` 逐层取 `off = child - value` 收集偏移后 reverse；paths 按 depth/module/offset 排序 + dedup_by 后 truncate(max_results)。
+- app/src/winmem.rs:22 `pub struct ModuleInfo { name: String, base: u64, size: u64 }`（`contains(address)`、`offset_of(address)`）。
+- app/src/app.rs 指针相关字段（line 143-155）：ptr_target: String、ptr_depth: usize、ptr_max_offset: u64、ptr_offset_text: String、ptr_job: Option<pointerscan::PtrHandle>、ptr_phase: ScanPhase、ptr_error、ptr_elapsed: Duration、ptr_paths: Vec<pointerscan::PointerPath>、ptr_modules: Vec<ModuleInfo>、ptr_modules_loaded: bool、ptr_selected: usize、ptr_scanned: usize；demo 初始化在 line 450-472。
+- app/src/app.rs:1903 `start_ptr_scan`（解析 ptr_target → 加载 modules → handle.regions(writable_only) → pointerscan::start_scan(...max_depth.clamp(1,8)...)）；:1965 `poll_ptr_scan`（rx.try_recv → ptr_paths = result.paths、ptr_phase = Done、空结果推 smart_msgs）；:2097 `add_ptr_path(index)`（取 final_address 加进 entries，desc 为 `指针链 {addr:016X}`）。
+- app/src/app.rs:747 `attach_handle(handle)`：不同 pid 时清 hits/hit_history/entries/selected_hit/mem_data/**ptr_modules/ptr_modules_loaded/ptr_paths**/sym_*；:788 `detach()` 清 process/hits/mem_data 但**不清 entries、不清 ptr_paths**。
+- 工作区序列化点：app/src/app.rs:2315 `session::Workspace { version: 1, entries, patches, table_entries, watches, table_path, script_source, asm_source, aob_text, scan_value, last_tab }`（collect_workspace）；:2331 `save_workspace()`；:2343 `restore_workspace() -> usize` 逐段还原。save_workspace 调用点：714、1359、2143、2434、2846、2866、3148。
+
+【环境坑（复用）】
+- run_code 内联含 `++` 报 `Expected ',', got '++'`；内联含反引号会截断模板字面量报 `Expected a semicolon` / `Expected ',', got '{'` —— 长代码用数组 join 或 write 工具写文件再跑。
+- 长命令（3 次连跑 dbg-test 各 50 秒）会超 run_code 默认 120s 上限，需拆开或加 timeoutMs。
+- `cargo build` 报 `failed to remove file ... target\debug\zero-scanner.exe: 拒绝访问 (os error 5)` = 有 zero-scanner 进程在跑，先 `powershell -NoProfile -Command "Stop-Process -Name zero-scanner -Force -ErrorAction SilentlyContinue"`。
+- selftest 与 dbg-test 的日志写在**当前工作目录**（selftest.log / dbg-test.log / dbg_trace.log），不是项目根。
+- 直接调用 read/grep/glob 必须在 run_code 里 await tools.xxx。
+
+Open objectives: 阅读 roadmap 并继续规划开发（m00003）—— 1.4 剩余：**指针地图存盘（进行中，本段刚开始读结构）**、插件扩展 struct_templates/game_profiles、MCP 可选 +2 工具；已完成 Lua 6→14、3 个 CE 样本、训练器导出 + --apply-table、调试器回归修复。

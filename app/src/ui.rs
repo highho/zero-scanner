@@ -2250,6 +2250,7 @@ impl ZeroApp {
 
         theme::card_frame().show(ui, |ui| {
             ui.set_width(ui.available_width());
+            let mut rebase = false;
             ui.horizontal(|ui| {
                 theme::section_label(ui, "指针链");
                 ui.add_space(4.0);
@@ -2261,7 +2262,30 @@ impl ZeroApp {
                         }
                     }
                 }
+                if self.ptr_stale && self.process.is_some() {
+                    ui.add_space(6.0);
+                    if theme::outline_button(ui, "按新基址重映射", true).clicked() {
+                        rebase = true;
+                    }
+                }
             });
+            if self.ptr_stale {
+                ui.add_space(4.0);
+                ui.label(
+                    egui::RichText::new(if self.process.is_some() {
+                        "这些链来自上次保存的指针地图，模块基址已经变了。"
+                    } else {
+                        "这些链来自上次保存的指针地图，连上进程后会自动按新基址重映射。"
+                    })
+                    .size(11.0)
+                    .color(theme::warn()),
+                );
+            }
+            if rebase {
+                if let Some(handle) = self.process.clone() {
+                    self.rebase_ptr_paths(&handle);
+                }
+            }
             ui.add_space(6.0);
             if self.ptr_paths.is_empty() {
                 ui.label(
