@@ -15,6 +15,7 @@
 //! pulling in an async runtime.
 
 use crate::ctable;
+use crate::debugger::{BpKind, DebugSession, Slot};
 use crate::inj;
 use crate::model::{ScanHit, ScanType, VType};
 use crate::scan::{self, ScanConfig};
@@ -63,6 +64,8 @@ struct Engine {
     /// patch list for exactly this reason; an MCP client that can write without
     /// being able to restore is worse than one that cannot write at all.
     patches: Vec<inj::Patch>,
+    /// 会话式调试器：zero_dbg_start 附加，zero_dbg_hits 读命中。
+    dbg: Option<Arc<DebugSession>>,
 }
 
 /// A background watch: its own thread keeps sampling while the agent works.
@@ -82,7 +85,15 @@ impl Engine {
             feedback: Vec::new(),
             watch: None,
             patches: Vec::new(),
+            dbg: None,
         }
+    }
+
+    fn dbg_active(&self) -> bool {
+        self.dbg
+            .as_ref()
+            .map(|d| d.status().attached)
+            .unwrap_or(false)
     }
 }
 
@@ -481,6 +492,28 @@ fn tool_definitions() -> Vec<Json> {
                 },
                 "required": ["address"]
             }
+        }),
+        json!({
+            "name": "zero_dbg_start",
+            "description": "对当前进程设硬件写入/读写断点，回答「谁在改这个地址」。会话式：start 之后去游戏里改值，再调 zero_dbg_hits 读命中。再次 start 会先停掉上一个。",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "address": { "type": "string", "description": "十六进制地址（game.exe+偏移 或 0x 前缀均可）" },
+                    "kind": { "type": "string", "description": "write（默认）或 readwrite" }
+                },
+                "required": ["address"]
+            }
+        }),
+        json!({
+            "name": "zero_dbg_hits",
+            "description": "读取硬件断点命中：命中指令、寄存器、写后值。clear=true 时读取后清空并停止调试。",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "clear": { "type": "boolean", "description": "读取后停止调试并清空（默认 false）" }
+                }
+            }
         })
     ]
 }
@@ -569,6 +602,9 @@ fn call_tool(name: &str, args: &Json, engine: &Arc<Mutex<Engine>>) -> Result<Str
             guard.hits.clear();
             guard.addresses.clear();
             guard.feedback.clear();
+            if let Some(old) = guard.dbg.take() {
+                old.stop();
+            }
             Ok(summary)
         }
         "zero_status" => {
@@ -910,6 +946,80 @@ fn call_tool(name: &str, args: &Json, engine: &Arc<Mutex<Engine>>) -> Result<Str
             let mut guard = engine.lock().map_err(|_| "引擎状态不可用".to_string())?;
             guard.addresses.push((description.clone(), address, vtype));
             Ok(format!("已添加 {address:016X}（{description}）"))
+        }
+        "zero_dbg_start" => {
+            let handle = engine_handle(engine)?;
+            let address = args
+                .get("address")
+                .and_then(|a| a.as_str())
+                .and_then(parse_hex_address)
+                .ok_or_else(|| "地址格式不对，需要十六进制".to_string())?;
+            let kind = match args.get("kind").and_then(|k| k.as_str()).unwrap_or("write") {
+                "readwrite" | "rw" => BpKind::ReadWrite,
+                _ => BpKind::Write,
+            };
+            let pid = handle.pid;
+            // 上一个会话先停。
+            if let Some(old) = &engine.lock().ok().and_then(|g| g.dbg.clone()) {
+                old.stop();
+            }
+            let session = DebugSession::start(pid, &handle)?;
+            // 附加是异步的：轮询等它，再落断点。
+            for _ in 0..50 {
+                if session.status().attached || session.status().error.is_some() {
+                    break;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(40));
+            }
+            let status = session.status();
+            if let Some(err) = &status.error {
+                return Err(format!("附加失败：{err}"));
+            }
+            if !status.attached {
+                return Err("附加超时".to_string());
+            }
+            session.set_breakpoint(Slot(0), address, kind)?;
+            let kind_label = match kind {
+                BpKind::Write => "写入",
+                BpKind::ReadWrite => "读写",
+            };
+            let mut guard = engine.lock().map_err(|_| "引擎状态不可用".to_string())?;
+            guard.dbg = Some(session);
+            Ok(format!(
+                "已对 {address:016X} 设{kind_label}断点（PID {pid}）。去游戏里改这个值，然后调 zero_dbg_hits。"
+            ))
+        }
+        "zero_dbg_hits" => {
+            let session = {
+                let guard = engine.lock().map_err(|_| "引擎状态不可用".to_string())?;
+                guard.dbg.clone().ok_or_else(|| "还没有调试会话，先 zero_dbg_start".to_string())?
+            };
+            let clear = args.get("clear").and_then(|c| c.as_bool()).unwrap_or(false);
+            let hits = session.hits();
+            if hits.is_empty() {
+                return Ok("还没有命中。确认游戏里已经改过那个值。".to_string());
+            }
+            let mut text = format!("共 {} 次命中：", hits.len());
+            for rec in hits.iter().rev().take(10) {
+                let written = rec
+                    .written
+                    .map(|v| format!("{v:#x}"))
+                    .unwrap_or_else(|| "?".to_string());
+                text.push_str(&format!(
+                    "\n  @{:016X}  {}  线程 {}  写后 {}",
+                    rec.rip, rec.asm, rec.thread, written
+                ));
+            }
+            if hits.len() > 10 {
+                text.push_str(&format!("\n  （只显示最近 10 条，共 {} 条）", hits.len()));
+            }
+            if clear {
+                session.stop();
+                let mut guard = engine.lock().map_err(|_| "引擎状态不可用".to_string())?;
+                guard.dbg = None;
+                text.push_str("\n调试已停止，断点已清除。");
+            }
+            Ok(text)
         }
         "zero_pointer_scan" => {
             let handle = engine_handle(engine)?;
