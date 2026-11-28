@@ -17,6 +17,7 @@ use crate::scan::{self, ScanConfig, ScanHandle};
 use crate::smart::{self, SmartPlan};
 use crate::syms;
 use crate::theme::{self, ToastKind};
+use crate::trainer;
 use crate::triage;
 use crate::update::{self, Updater};
 use crate::winmem::{self, ModuleInfo, ProcessHandle, ProcessInfo};
@@ -223,6 +224,13 @@ pub struct ZeroApp {
     pub ct_error: Option<String>,
     pub ct_status: String,
 
+    /// Where a trainer export lands. Empty means "next to the table".
+    pub trainer_dir: String,
+    /// Result of the last export, kept so the page can list what was skipped
+    /// and where the two files went.
+    pub trainer_export: Option<trainer::Export>,
+    pub trainer_error: Option<String>,
+
     pub speed_factor: f64,
     pub speed_on: bool,
     pub speed_base: f64,
@@ -367,6 +375,9 @@ impl ZeroApp {
             ct_table: None,
             ct_error: None,
             ct_status: String::new(),
+            trainer_dir: String::new(),
+            trainer_export: None,
+            trainer_error: None,
             speed_factor: 1.0,
             speed_on: false,
             speed_base: 1.0,
@@ -786,8 +797,13 @@ impl ZeroApp {
 
     pub fn attach_info(&mut self, info: &ProcessInfo) {
         match winmem::open_process(info.pid, &info.name) {
-            Ok(handle) => self.attach_handle(handle),
+            Ok(handle) => {
+                crate::diag::clear_last();
+                self.attach_handle(handle);
+            }
             Err(e) => {
+                // open_process already recorded the diagnosis; the picker and the
+                // MCP server read that same sentence instead of re-deriving it.
                 self.attach_error = Some(e.clone());
                 self.toast(e, ToastKind::Error);
             }
@@ -2948,6 +2964,59 @@ impl ZeroApp {
         self.toast(format!("已生成 {count} 条表格条目"), ToastKind::Success);
     }
 
+    /// Export the open table as a trainer: a trimmed .ct plus a .bat that
+    /// calls this same executable. Every entry is dry-run first, so the page
+    /// can tell the player exactly which entries made it and why the rest did
+    /// not. Nothing is written when no entry survives.
+    pub fn export_trainer(&mut self) {
+        let Some(handle) = self.process.clone() else {
+            self.toast("先连接一个进程，才能核对表里的地址。", ToastKind::Warn);
+            return;
+        };
+        let Some(table) = self.ct_table.clone() else {
+            self.toast("还没有打开任何表格。", ToastKind::Warn);
+            return;
+        };
+        let out_dir = if self.trainer_dir.trim().is_empty() {
+            match PathBuf::from(self.ct_path.trim()).parent() {
+                Some(dir) if !dir.as_os_str().is_empty() => dir.to_path_buf(),
+                _ => PathBuf::from("."),
+            }
+        } else {
+            PathBuf::from(self.trainer_dir.trim())
+        };
+        let exe = match std::env::current_exe() {
+            Ok(path) => path,
+            Err(e) => {
+                let message = format!("找不到自己的可执行文件：{e}");
+                self.trainer_error = Some(message.clone());
+                self.toast(message, ToastKind::Error);
+                return;
+            }
+        };
+        match trainer::export(&table, &handle, &out_dir, &exe) {
+            Ok(export) => {
+                let ready = export.ready;
+                let skipped = export.skipped.len();
+                let dir_text = out_dir.display().to_string();
+                self.trainer_export = Some(export);
+                self.trainer_error = None;
+                self.toast(
+                    format!("训练器已导出：{ready} 条可用，{skipped} 条跳过（{dir_text}）"),
+                    if skipped == 0 {
+                        ToastKind::Success
+                    } else {
+                        ToastKind::Warn
+                    },
+                );
+            }
+            Err(e) => {
+                self.trainer_export = None;
+                self.trainer_error = Some(e.clone());
+                self.toast(e, ToastKind::Error);
+            }
+        }
+    }
     pub fn assemble_source(&mut self) {
         let origin = if self.asm_origin.trim().is_empty() {
             0u64

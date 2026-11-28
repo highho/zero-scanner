@@ -3712,6 +3712,8 @@ impl ZeroApp {
         let mut save = false;
         let mut import = false;
         let mut export = false;
+        let mut trainer = false;
+        let can_export = count > 0 && self.is_attached();
 
         ui.horizontal(|ui| {
             ui.vertical(|ui| {
@@ -3853,6 +3855,86 @@ impl ZeroApp {
                 });
         });
 
+        theme::card_frame().show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.horizontal(|ui| {
+                theme::section_label(ui, "训练器");
+                ui.add_space(4.0);
+                ui.label(
+                    egui::RichText::new(
+                        "导出成玩家双击就能用的两个文件：一张精简过的 .ct，和一个调用本程序的 .bat。",
+                    )
+                    .size(10.5)
+                    .color(theme::faint()),
+                );
+            });
+            ui.add_space(8.0);
+            ui.horizontal(|ui| {
+                ui.label(egui::RichText::new("输出到").size(11.0).color(theme::faint()));
+                ui.add_sized(
+                    [380.0, 32.0],
+                    egui::TextEdit::singleline(&mut self.trainer_dir)
+                        .font(FontId::monospace(12.5))
+                        .hint_text("留空则与 .ct 文件同目录"),
+                );
+                if theme::gradient_button(ui, "导出训练器", 132.0, can_export).clicked() && can_export {
+                    trainer = true;
+                }
+            });
+            if !self.is_attached() {
+                ui.add_space(4.0);
+                ui.label(
+                    egui::RichText::new("导出前会逐条核对地址与可还原性，所以要先连接目标进程。")
+                        .size(10.5)
+                        .color(theme::faint()),
+                );
+            }
+            if let Some(error) = &self.trainer_error {
+                ui.add_space(4.0);
+                ui.label(egui::RichText::new(error).size(11.0).color(theme::danger()));
+            }
+            if let Some(export) = &self.trainer_export {
+                ui.add_space(6.0);
+                ui.horizontal(|ui| {
+                    theme::tag(
+                        ui,
+                        &format!("{} 条可用", export.ready),
+                        theme::success(),
+                    );
+                    if export.skipped.is_empty() {
+                        theme::tag(ui, "没有条目被跳过", theme::muted());
+                    } else {
+                        theme::tag(
+                            ui,
+                            &format!("{} 条跳过", export.skipped.len()),
+                            theme::warn(),
+                        );
+                    }
+                });
+                ui.add_space(4.0);
+                for (label, path) in [
+                    ("表格", &export.table_path),
+                    ("启动器", &export.launcher_path),
+                ] {
+                    ui.label(
+                        egui::RichText::new(format!("{label}  {}", path.display()))
+                            .size(10.5)
+                            .color(theme::muted())
+                            .font(FontId::monospace(10.5)),
+                    );
+                }
+                if !export.skipped.is_empty() {
+                    ui.add_space(4.0);
+                    for reason in &export.skipped {
+                        ui.label(
+                            egui::RichText::new(format!("跳过 · {reason}"))
+                                .size(10.5)
+                                .color(theme::warn()),
+                        );
+                    }
+                }
+            }
+        });
         if open {
             self.open_ct_table();
         }
@@ -3864,6 +3946,9 @@ impl ZeroApp {
         }
         if export {
             self.export_entries_to_ct();
+        }
+        if trainer {
+            self.export_trainer();
         }
     }
 
