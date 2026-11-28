@@ -169,6 +169,9 @@ pub struct ZeroApp {
     pub sym_error: Option<String>,
     pub sym_show_imports: bool,
     pub sym_elapsed: Duration,
+    pub alias_name: String,
+    pub alias_expr: String,
+    pub alias_error: Option<String>,
 
     pub dbg: Option<Arc<DebugSession>>,
     pub dbg_addr: String,
@@ -414,6 +417,9 @@ impl ZeroApp {
             sym_error: None,
             sym_show_imports: false,
             sym_elapsed: Duration::ZERO,
+            alias_name: String::new(),
+            alias_expr: String::new(),
+            alias_error: None,
             dbg: None,
             dbg_addr: String::new(),
             dbg_kind: BpKind::Write,
@@ -474,6 +480,12 @@ impl ZeroApp {
                 },
             ];
             app.ptr_modules_loaded = true;
+            // Demo aliases so the symbol page shows the card with content.
+            crate::aliases::clear();
+            let _ = crate::aliases::add("player_hp", "game.exe+0x1A2B");
+            let _ = crate::aliases::add("ammo", "game.exe+0x1A2B,0x18,0x30");
+            app.alias_name = "coins".to_string();
+            app.alias_expr = "game.dll+0x8C,0x4,0x0".to_string();
             app.aob_text = "48 8B ?? 05".to_string();
             app.aob_hits = vec![0x7FF6_A1B2_C3E0, 0x7FF6_B2C3_9120];
             app.script_source = "-- 读取生命值并写回\nlocal addr = getAddress(\"game.exe+1A2B\")\nprint(\"生命值地址\", string.format(\"%X\", addr))\nprint(\"当前值\", readInteger(addr, 4))".to_string();

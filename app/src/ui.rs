@@ -2772,6 +2772,141 @@ impl ZeroApp {
         if let Some(address) = to_disasm {
             self.jump_to_disasm(address);
         }
+        self.ui_aliases(ui);
+    }
+
+    /// The address alias card. Lives on the symbol page because an alias is
+    /// the same idea as a PE symbol, except the user owns it.
+    pub fn ui_aliases(&mut self, ui: &mut egui::Ui) {
+        // Aliases: the user's own names for addresses. They sit beside the PE
+        // symbols because both answer "what is this address called?", but an
+        // alias is the one the user can edit after a game update.
+        ui.add_space(14.0);
+        theme::card_frame().show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.horizontal(|ui| {
+                theme::section_label(ui, "地址别名");
+                ui.add_space(6.0);
+                let count = crate::aliases::list().len();
+                theme::status_chip(
+                    ui,
+                    &format!("{count} 个"),
+                    if count == 0 {
+                        theme::faint()
+                    } else {
+                        theme::accent_2()
+                    },
+                );
+            });
+            ui.add_space(2.0);
+            ui.label(
+                egui::RichText::new(
+                    "给地址起个名字，之后所有地址框都能用它（含指针链 hp,0x18）。游戏更新后改一次名字就够了。",
+                )
+                .size(11.5)
+                .color(theme::muted()),
+            );
+            ui.add_space(8.0);
+            let mut submit = false;
+            ui.horizontal(|ui| {
+                ui.add_sized(
+                    [150.0, 30.0],
+                    egui::TextEdit::singleline(&mut self.alias_name)
+                        .font(FontId::monospace(12.0))
+                        .hint_text("名字"),
+                );
+                ui.label(egui::RichText::new("=").size(12.0).color(theme::faint()));
+                let expression = ui.add_sized(
+                    [300.0, 30.0],
+                    egui::TextEdit::singleline(&mut self.alias_expr)
+                        .font(FontId::monospace(12.0))
+                        .hint_text("game.exe+0x4A0C8 或 0x7FF6A1B2"),
+                );
+                if expression.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                    submit = true;
+                }
+                let can_add =
+                    !self.alias_name.trim().is_empty() && !self.alias_expr.trim().is_empty();
+                if theme::gradient_button(ui, "记下", 92.0, can_add).clicked() {
+                    submit = true;
+                }
+            });
+            if submit {
+                let name = self.alias_name.trim().to_string();
+                let expression = self.alias_expr.trim().to_string();
+                match crate::aliases::add(&name, &expression) {
+                    Ok(()) => {
+                        self.alias_name.clear();
+                        self.alias_expr.clear();
+                        self.alias_error = None;
+                        self.save_workspace();
+                        self.toast(
+                            format!("别名已记下：{name} = {expression}"),
+                            ToastKind::Success,
+                        );
+                    }
+                    Err(e) => {
+                        self.alias_error = Some(e.clone());
+                        self.toast(e, ToastKind::Warn);
+                    }
+                }
+            }
+            if let Some(error) = &self.alias_error {
+                ui.add_space(4.0);
+                ui.label(egui::RichText::new(error).size(11.5).color(theme::danger()));
+            }
+            let aliases = crate::aliases::list();
+            ui.add_space(6.0);
+            if aliases.is_empty() {
+                ui.label(
+                    egui::RichText::new("还没有别名。")
+                        .size(12.0)
+                        .color(theme::faint()),
+                );
+            } else {
+                let mut remove: Option<String> = None;
+                let mut copy: Option<String> = None;
+                for alias in &aliases {
+                    theme::soft_card().show(ui, |ui| {
+                        ui.set_width(ui.available_width());
+                        ui.horizontal(|ui| {
+                            ui.label(
+                                egui::RichText::new(&alias.name)
+                                    .size(12.5)
+                                    .strong()
+                                    .font(FontId::monospace(12.5))
+                                    .color(theme::accent()),
+                            );
+                            ui.label(egui::RichText::new("=").size(11.0).color(theme::faint()));
+                            ui.label(
+                                egui::RichText::new(&alias.expression)
+                                    .size(12.0)
+                                    .font(FontId::monospace(12.0))
+                                    .color(theme::text()),
+                            );
+                            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                                if theme::outline_button(ui, "删除", true).clicked() {
+                                    remove = Some(alias.name.clone());
+                                }
+                                if theme::outline_button(ui, "复制", true).clicked() {
+                                    copy = Some(alias.name.clone());
+                                }
+                            });
+                        });
+                    });
+                }
+                if let Some(name) = copy {
+                    ui.output_mut(|o| o.copied_text = name.clone());
+                    self.toast(format!("已复制别名 {name}"), ToastKind::Info);
+                }
+                if let Some(name) = remove {
+                    if crate::aliases::remove(&name) {
+                        self.save_workspace();
+                        self.toast(format!("已删除别名 {name}"), ToastKind::Info);
+                    }
+                }
+            }
+        });
     }
 
     pub fn ui_disasm(&mut self, ui: &mut egui::Ui) {
