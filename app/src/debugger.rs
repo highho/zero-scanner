@@ -19,7 +19,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{mpsc, Arc, Mutex};
 use std::time::Instant;
 use windows_sys::Win32::Foundation::{
-    CloseHandle, GetLastError, DBG_CONTINUE, DBG_EXCEPTION_NOT_HANDLED, NTSTATUS,
+    CloseHandle, GetLastError, DBG_CONTINUE, DBG_EXCEPTION_NOT_HANDLED, HANDLE, NTSTATUS,
 };
 use windows_sys::Win32::System::Diagnostics::Debug::{
     ContinueDebugEvent, DebugActiveProcess, DebugActiveProcessStop, DebugSetProcessKillOnExit,
@@ -29,7 +29,10 @@ use windows_sys::Win32::System::Diagnostics::Debug::{
     UNLOAD_DLL_DEBUG_EVENT, WOW64_CONTEXT, CONTEXT_ALL_AMD64, WOW64_CONTEXT_ALL, CONTEXT,
     CONTEXT_DEBUG_REGISTERS_AMD64, WOW64_CONTEXT_DEBUG_REGISTERS,
 };
-use windows_sys::Win32::System::Threading::{OpenThread, THREAD_GET_CONTEXT, THREAD_SET_CONTEXT};
+use windows_sys::Win32::System::Threading::{
+    OpenProcess, OpenThread, ResumeThread, SuspendThread, TerminateProcess, PROCESS_TERMINATE,
+    THREAD_GET_CONTEXT, THREAD_SET_CONTEXT, THREAD_SUSPEND_RESUME,
+};
 
 const EXCEPTION_SINGLE_STEP: i32 = -2147483644;
 const ERROR_SEM_TIMEOUT: u32 = 121;
@@ -170,24 +173,16 @@ pub struct DebugSession {
 
 impl DebugSession {
     pub fn start(pid: u32, target: &Arc<ProcessHandle>) -> Result<Arc<Self>, String> {
-        if pid == std::process::id() {
-            return Err("不能调试 Zero 自己：断点会用单步异常钉住自身线程。".to_string());
-        }
-        if unsafe { DebugActiveProcess(pid) } == 0 {
-            let code = unsafe { GetLastError() };
-            return Err(format!(
-                "附加调试失败（系统错误 {code}：{}）",
-                describe_error(code)
-            ));
-        }
-        unsafe { DebugSetProcessKillOnExit(0) };
-
+        // 注意：DebugActiveProcess 的调用线程即调试器，WaitForDebugEvent 必须
+        // 由同一线程调用（否则返回 ERROR_INVALID_HANDLE=6）。所以附加动作移到
+        // 事件线程里做；start() 只 spawn 线程并立即返回，调用方轮询
+        // status() 直到 attached==true 或 error 出现。
         let shared = Arc::new(Mutex::new(Shared {
             slots: [None, None, None, None],
             hits: Vec::new(),
             requests: Vec::new(),
             error: None,
-            attached: true,
+            attached: false,
             pid,
             is_64bit: target.is_64bit,
         }));
@@ -253,6 +248,8 @@ impl DebugSession {
     }
 
     pub fn stop(&self) {
+        // 只设置停止标记；真正 detach（DebugActiveProcessStop）必须由事件线程
+        // 自己执行（调试 API 线程绑定）。事件线程在循环顶部看到 stop 后退出。
         self.stop.store(true, Ordering::SeqCst);
         self.clear_all();
     }
@@ -286,40 +283,100 @@ impl Shared {
     }
 }
 
+
+/// 调试追踪（ZERO_DBG_TRACE=1 时启用，写 dbg_trace.log），用于排查断点不命中。
+fn dbg_trace(label: impl AsRef<str>) {
+    if std::env::var("ZERO_DBG_TRACE").as_deref() != Ok("1") {
+        return;
+    }
+    use std::io::Write;
+    if let Ok(mut f) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open("dbg_trace.log")
+    {
+        let _ = writeln!(f, "{}", label.as_ref());
+    }
+}
+
 fn debug_loop(
     shared: &Arc<Mutex<Shared>>,
     stop: &Arc<AtomicBool>,
     target: &Arc<ProcessHandle>,
 ) -> Result<(), String> {
+    let pid = shared.lock().map(|s| s.pid).unwrap_or(0);
+    if pid == std::process::id() {
+        return Err("不能调试 Zero 自己".to_string());
+    }
+    // 附加必须与 WaitForDebugEvent 同线程：在这里做。
+    if unsafe { DebugActiveProcess(pid) } == 0 {
+        let code = unsafe { GetLastError() };
+        if let Ok(mut s) = shared.lock() {
+            s.error = Some(format!(
+                "附加调试失败（系统错误 {code}：{}）",
+                describe_error(code)
+            ));
+        }
+        return Err(format!(
+            "附加调试失败（系统错误 {code}：{}）",
+            describe_error(code)
+        ));
+    }
+    unsafe { DebugSetProcessKillOnExit(0) };
+    if let Ok(mut s) = shared.lock() {
+        s.attached = true;
+    }
+    dbg_trace("loop: attached");
+
     let mut threads: Vec<ThreadState> = Vec::new();
+    let mut ready_for_requests = false;
     let mut exit_requested = false;
     let mut event: DEBUG_EVENT = unsafe { std::mem::zeroed() };
 
     while !exit_requested && !stop.load(Ordering::SeqCst) {
-        drain_requests(shared, target, &mut threads)?;
+        // 初始 Set 请求必须先等 CREATE_PROCESS（线程枚举完成）再应用；
+        // 在此之前 threads 为空，drain 会把断点"消费"掉却没写进任何线程。
+        // 所以顶部不 drain；CREATE_PROCESS 分支里排空初始请求，之后循环顶部
+        // drain 处理后续请求（加断点/清除）。
+        dbg_trace("loop: waiting event");
         let got = unsafe { WaitForDebugEvent(&mut event, 50) };
         if got == 0 {
-            if unsafe { GetLastError() } == ERROR_SEM_TIMEOUT {
+            let code = unsafe { GetLastError() };
+            dbg_trace(format!("loop: WaitForDebugEvent returned 0, err={code}"));
+            if code == ERROR_SEM_TIMEOUT {
                 continue;
             }
-            return Err(format!(
-                "WaitForDebugEvent 失败（系统错误 {}）",
-                unsafe { GetLastError() }
-            ));
+            return Err(format!("WaitForDebugEvent 失败（系统错误 {code}）"));
         }
+        dbg_trace(format!("loop: WaitForDebugEvent got event, code={}", event.dwDebugEventCode));
 
         let proc = event.dwProcessId;
         let thr = event.dwThreadId;
+        dbg_trace(format!("loop: event={} pid={} thr={}", event.dwDebugEventCode, proc, thr));
+        if ready_for_requests {
+            drain_requests(shared, target, &mut threads)?;
+        }
         match event.dwDebugEventCode as u32 {
             CREATE_PROCESS_DEBUG_EVENT => {
+                // 附加已有进程时，只有初始线程会收到 CREATE_PROCESS 事件；
+                // 其它早已存在的线程（自增线程、渲染线程等）不会再有
+                // CREATE_THREAD 事件。必须用 ToolHelp 枚举全部线程一次，
+                // 否则断点会漏掉它们，永不命中。
+                for tid in crate::speed::thread_ids(proc) {
+                    thread_enter(&mut threads, tid);
+                }
                 thread_enter(&mut threads, thr);
+                ready_for_requests = true;
                 drain_requests(shared, target, &mut threads)?;
                 close_debug_handles(&event);
                 continue_debug(proc, thr, DBG_CONTINUE);
             }
             CREATE_THREAD_DEBUG_EVENT => {
                 thread_enter(&mut threads, thr);
-                apply_slots_thread(shared, target, &mut threads, thr)?;
+                // 用事件附带的 hThread：它已带 GET_CONTEXT|SET_CONTEXT 权限。
+                // 自己 OpenThread 在新线程上可能拿到不完整句柄导致 998。
+                let handle = unsafe { event.u.CreateThread.hThread };
+                apply_slots_thread(shared, target, &mut threads, thr, handle)?;
                 close_debug_handles(&event);
                 continue_debug(proc, thr, DBG_CONTINUE);
             }
@@ -342,6 +399,7 @@ fn debug_loop(
             EXCEPTION_DEBUG_EVENT => {
                 let record = unsafe { event.u.Exception.ExceptionRecord };
                 let code = record.ExceptionCode;
+                dbg_trace(format!("loop: EXCEPTION code={}", code));
                 if code == EXCEPTION_SINGLE_STEP {
                     handle_hit(shared, target, thr, &mut threads);
                     continue_debug(proc, thr, DBG_CONTINUE);
@@ -410,6 +468,7 @@ fn drain_requests(
     for request in requests {
         match request {
             Request::Set { slot, address, kind } => {
+                dbg_trace(format!("request: Set slot={} addr={address:X} kind={:?}", slot.0, kind));
                 if let Ok(mut s) = shared.lock() {
                     if s.slots[slot.index()].is_some() {
                         continue;
@@ -442,6 +501,7 @@ fn apply_slots_thread(
     target: &Arc<ProcessHandle>,
     _threads: &mut Vec<ThreadState>,
     thread_id: u32,
+    event_handle: HANDLE,
 ) -> Result<(), String> {
     let slots: [Option<(u64, BpKind)>; 4] = {
         let s = shared.lock().map_err(|_| "调试器状态锁被占用".to_string())?;
@@ -450,19 +510,73 @@ fn apply_slots_thread(
     if slots.iter().all(|s| s.is_none()) {
         return Ok(());
     }
-    let mut ctx = read_thread_context(target, thread_id).ok_or_else(|| {
-        format!("无法读取线程 {thread_id} 上下文（系统错误 {}）", unsafe { GetLastError() })
-    })?;
+    // 优先用事件附带的 hThread（已带权限，且新线程此刻本就被调试器挂起）；
+    // 写挂起中的线程无需自己再挂一层。
+    let handle = if event_handle != 0 {
+        event_handle
+    } else {
+        unsafe { OpenThread(THREAD_GET_CONTEXT | THREAD_SET_CONTEXT, 0, thread_id) }
+    };
+    if handle == 0 {
+        return Err(format!("无法打开线程 {thread_id} 上下文句柄"));
+    }
+    let mut ctx = read_context_with(handle, target.is_64bit)
+        .ok_or_else(|| format!("无法读取线程 {thread_id} 上下文（系统错误 {}）", unsafe { GetLastError() }))?;
     ctx.set_dr7(0);
     for (index, slot) in slots.iter().enumerate().take(4) {
         if let Some((address, kind)) = slot {
             set_slot_dr(&mut ctx, index, *address, *kind);
         }
     }
-    if !write_thread_context(target, thread_id, &ctx) {
+    let ok = write_context_with(handle, target.is_64bit, &ctx);
+    if event_handle == 0 {
+        unsafe { CloseHandle(handle) };
+    }
+    if !ok {
         return Err(format!("无法写入线程 {thread_id} 上下文（系统错误 {}）", unsafe { GetLastError() }));
     }
     Ok(())
+}
+
+
+/// 用已打开的线程句柄读上下文（调用方负责先挂起线程）。
+fn read_context_with(handle: HANDLE, is_64bit: bool) -> Option<SavedCtx> {
+    unsafe {
+        if is_64bit {
+            let mut ctx: CONTEXT = std::mem::zeroed();
+            ctx.ContextFlags = CONTEXT_DEBUG_REGISTERS_AMD64;
+            if GetThreadContext(handle, &mut ctx) == 0 {
+                return None;
+            }
+            Some(SavedCtx::X64(ctx))
+        } else {
+            let mut ctx: WOW64_CONTEXT = std::mem::zeroed();
+            ctx.ContextFlags = WOW64_CONTEXT_DEBUG_REGISTERS;
+            if Wow64GetThreadContext(handle, &mut ctx) == 0 {
+                return None;
+            }
+            Some(SavedCtx::X86(ctx))
+        }
+    }
+}
+
+/// 用已打开的线程句柄写上下文（只提交调试寄存器子集）。
+fn write_context_with(handle: HANDLE, is_64bit: bool, ctx: &SavedCtx) -> bool {
+    unsafe {
+        match (ctx, is_64bit) {
+            (SavedCtx::X64(c), true) => {
+                let mut c = c.clone();
+                c.ContextFlags = CONTEXT_DEBUG_REGISTERS_AMD64;
+                SetThreadContext(handle, &c) != 0
+            }
+            (SavedCtx::X86(c), false) => {
+                let mut c = c.clone();
+                c.ContextFlags = WOW64_CONTEXT_DEBUG_REGISTERS;
+                Wow64SetThreadContext(handle, &c) != 0
+            }
+            _ => false,
+        }
+    }
 }
 
 fn apply_slot_to_all(
@@ -472,17 +586,41 @@ fn apply_slot_to_all(
     address: u64,
     kind: BpKind,
 ) -> Result<(), String> {
+    // 运行中的线程直接 SetThreadContext 写 DR 会返回 998（ERROR_NOACCESS），
+    // 必须先挂起线程、写完再恢复。单个线程失败只跳过它（线程可能刚好退出），
+    // 不能让整个事件循环崩掉。
+    let mut failed = 0usize;
     for thread in threads.iter_mut() {
-        let mut ctx = read_thread_context(target, thread.id).ok_or_else(|| {
-            format!("无法读取线程 {} 上下文（系统错误 {}）", thread.id, unsafe { GetLastError() })
-        })?;
-        if thread.original.is_none() {
-            thread.original = Some(ctx.clone());
+        let handle = unsafe {
+            OpenThread(
+                THREAD_GET_CONTEXT | THREAD_SET_CONTEXT | THREAD_SUSPEND_RESUME,
+                0,
+                thread.id,
+            )
+        };
+        if handle == 0 {
+            failed += 1;
+            continue;
         }
-        set_slot_dr(&mut ctx, index, address, kind);
-        if !write_thread_context(target, thread.id, &ctx) {
-            return Err(format!("无法写入线程 {} 上下文（系统错误 {}）", thread.id, unsafe { GetLastError() }));
+        unsafe { SuspendThread(handle) };
+        let mut ok = false;
+        if let Some(mut ctx) = read_context_with(handle, target.is_64bit) {
+            if thread.original.is_none() {
+                thread.original = Some(ctx.clone());
+            }
+            set_slot_dr(&mut ctx, index, address, kind);
+            ok = write_context_with(handle, target.is_64bit, &ctx);
         }
+        unsafe { ResumeThread(handle) };
+        unsafe { CloseHandle(handle) };
+        if ok {
+            dbg_trace(format!("apply: Dr written to thread {}", thread.id));
+        } else {
+            failed += 1;
+        }
+    }
+    if failed > 0 && failed >= threads.len() {
+        return Err(format!("所有线程都写不进断点（{failed} 个失败）"));
     }
     Ok(())
 }
@@ -493,30 +631,54 @@ fn clear_slot_from_all(
     index: usize,
 ) -> Result<(), String> {
     for thread in threads.iter_mut() {
-        if let Some(mut ctx) = read_thread_context(target, thread.id) {
+        let handle = unsafe {
+            OpenThread(
+                THREAD_GET_CONTEXT | THREAD_SET_CONTEXT | THREAD_SUSPEND_RESUME,
+                0,
+                thread.id,
+            )
+        };
+        if handle == 0 {
+            continue;
+        }
+        unsafe { SuspendThread(handle) };
+        if let Some(mut ctx) = read_context_with(handle, target.is_64bit) {
             ctx.set_dr_slot(index, 0);
             let dr7 = ctx.dr7() & !slot_dr7_mask(index);
             ctx.set_dr7(dr7);
-            if !write_thread_context(target, thread.id, &ctx) {
-                return Err(format!("无法清除线程 {} 断点（系统错误 {}）", thread.id, unsafe { GetLastError() }));
-            }
+            write_context_with(handle, target.is_64bit, &ctx);
         }
+        unsafe { ResumeThread(handle) };
+        unsafe { CloseHandle(handle) };
     }
     Ok(())
 }
 
 fn restore_all(target: &Arc<ProcessHandle>, threads: &mut [ThreadState]) {
     for thread in threads.iter_mut() {
+        let handle = unsafe {
+            OpenThread(
+                THREAD_GET_CONTEXT | THREAD_SET_CONTEXT | THREAD_SUSPEND_RESUME,
+                0,
+                thread.id,
+            )
+        };
+        if handle == 0 {
+            continue;
+        }
+        unsafe { SuspendThread(handle) };
         if let Some(original) = &thread.original {
-            let _ = write_thread_context_saved(thread.id, original);
-        } else if let Some(mut ctx) = read_thread_context(target, thread.id) {
+            let _ = write_context_with(handle, target.is_64bit, original);
+        } else if let Some(mut ctx) = read_context_with(handle, target.is_64bit) {
             ctx.set_dr7(0);
             ctx.set_dr_slot(0, 0);
             ctx.set_dr_slot(1, 0);
             ctx.set_dr_slot(2, 0);
             ctx.set_dr_slot(3, 0);
-            let _ = write_thread_context(target, thread.id, &ctx);
+            let _ = write_context_with(handle, target.is_64bit, &ctx);
         }
+        unsafe { ResumeThread(handle) };
+        unsafe { CloseHandle(handle) };
     }
 }
 
@@ -761,6 +923,178 @@ fn set_slot_dr(ctx: &mut SavedCtx, index: usize, address: u64, kind: BpKind) {
     dr7 &= !slot_dr7_mask(index);
     dr7 |= local_enable | rw | len;
     ctx.set_dr7(dr7);
+}
+
+
+/// 调试器自测靶场（--dbg-target 子进程模式）。
+///
+/// 启动一个后台线程，每隔 100ms 对某个地址自增一次，把 PID 与地址写进
+/// info 文件（stdout 被 windows_subsystem 屏蔽，不能用输出传参）。自检流程
+/// attach 这个进程 → 对该地址设写断点 → 断言命中 → detach → 断言无残留。
+
+/// 独立调试器闭环验证（--dbg-test）。
+/// spawn 自测靶场子进程 → 附加 → 设写入断点 → 等待命中 → detach → 断言目标
+/// 无残留。整体自带超时，失败/卡死都在 CLI 层被兜住，不会拖死 selftest。
+pub fn cli_test() -> bool {
+    use std::io::Write;
+    let mut out = String::new();
+    let mut ok = true;
+    #[allow(unused_macros)]
+    macro_rules! ln {
+        ($($arg:tt)*) => {
+            out.push_str(&format!($($arg)*));
+            out.push('\n');
+        };
+    }
+    macro_rules! check {
+        ($cond:expr, $($arg:tt)*) => {
+            if $cond {
+                ln!("PASS  {}", format!($($arg)*));
+            } else {
+                ok = false;
+                ln!("FAIL  {}", format!($($arg)*));
+            }
+        };
+    }
+    ln!("[debugger] 自测靶场闭环");
+    let info = std::env::temp_dir().join("zero-dbgtest.info");
+    let _ = std::fs::remove_file(&info);
+    let exe = match std::env::current_exe() {
+        Ok(p) => p,
+        Err(e) => {
+            ln!("FAIL  定位自身 exe：{e}");
+            std::fs::write("dbg-test.log", &out).ok();
+            return false;
+        }
+    };
+    let mut child = match std::process::Command::new(&exe).arg("--dbg-target").arg(&info).spawn() {
+        Ok(c) => c,
+        Err(e) => {
+            ln!("FAIL  启动靶场：{e}");
+            std::fs::write("dbg-test.log", &out).ok();
+            return false;
+        }
+    };
+    // 等靶场写出 pid/addr。
+    let mut pid = 0u32;
+    let mut addr = 0u64;
+    for _ in 0..100 {
+        if let Ok(text) = std::fs::read_to_string(&info) {
+            for l in text.lines() {
+                if let Some(v) = l.strip_prefix("pid=") { pid = v.trim().parse().unwrap_or(0); }
+                if let Some(v) = l.strip_prefix("addr=") {
+                    addr = u64::from_str_radix(v.trim().trim_start_matches("0x"), 16).unwrap_or(0);
+                }
+            }
+            if pid != 0 && addr != 0 { break; }
+        }
+        std::thread::sleep(std::time::Duration::from_millis(40));
+    }
+    check!(pid != 0 && addr != 0, "靶场已就绪 pid={pid} addr={addr:#X}");
+    if pid == 0 || addr == 0 {
+        let _ = child.kill();
+        let _ = child.wait();
+        std::fs::write("dbg-test.log", &out).ok();
+        return false;
+    }
+    // 给整个调试过程一个总超时：50 秒后强制退出，避免事件循环卡死拖住进程。
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(45);
+    let child_pid = child.id();
+    let guard = std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_secs(50));
+        unsafe {
+            let h = OpenProcess(PROCESS_TERMINATE, 0, child_pid);
+            if h != 0 {
+                TerminateProcess(h, 1);
+                CloseHandle(h);
+            }
+        }
+    });
+    let handle = match crate::winmem::open_process(pid, "dbg-target") {
+        Ok(h) => h,
+        Err(e) => {
+            ln!("FAIL  打开目标进程：{e}");
+            let _ = guard.join();
+            std::fs::write("dbg-test.log", &out).ok();
+            return false;
+        }
+    };
+    let session = match DebugSession::start(pid, &handle) {
+        Ok(s) => s,
+        Err(e) => {
+            ln!("FAIL  附加调试：{e}");
+            let _ = guard.join();
+            std::fs::write("dbg-test.log", &out).ok();
+            return false;
+        }
+    };
+    // 附加发生在事件线程，异步：轮询等它完成。
+    let mut attached = false;
+    for _ in 0..50 {
+        if session.status().attached { attached = true; break; }
+        if session.status().error.is_some() { break; }
+        std::thread::sleep(std::time::Duration::from_millis(40));
+    }
+    check!(attached, "已附加（error={:?}）", session.status().error);
+    match session.set_breakpoint(Slot(0), addr, BpKind::Write) {
+        Ok(()) => {
+            // 等命中；每 50ms 查一次，最多 10 秒。
+            let mut hits = 0usize;
+            while std::time::Instant::now() < deadline {
+                hits = session.hits().len();
+                if hits >= 3 { break; }
+                std::thread::sleep(std::time::Duration::from_millis(60));
+            }
+            check!(hits >= 1, "写入断点命中 {hits} 次");
+            let records = session.hits();
+            if let Some(rec) = records.last() {
+                check!(rec.rip != 0, "命中带 RIP {:#X}", rec.rip);
+                check!(!rec.bytes.is_empty(), "命中记录指令字节");
+                check!(rec.written.is_some(), "命中读回写入值");
+            }
+            session.stop();
+            if let Some(done) = &session.done {
+                let _ = done.recv_timeout(std::time::Duration::from_secs(5));
+            }
+            check!(session.status().error.is_none(), "detach 无错误 ({:?})", session.status().error);
+            check!(
+                crate::winmem::open_process(pid, "dbg-target").is_ok(),
+                "detach 后目标仍存活"
+            );
+        }
+        Err(e) => {
+            ln!("FAIL  设置断点：{e}");
+        }
+    }
+    let _ = guard.join();
+    let _ = child.kill();
+    let _ = child.wait();
+    let _ = std::fs::remove_file(&info);
+    ln!("RESULT: {}", if ok { "PASS" } else { "FAIL" });
+    std::fs::write("dbg-test.log", &out).ok();
+    println!("{out}");
+    ok
+}
+
+pub fn target_main() -> ! {
+    // &'static mut u64 是 Send（u64: Send），可以安全 move 进后台线程。
+    let counter: &'static mut u64 = Box::leak(Box::new(0u64));
+    let addr = counter as *mut u64 as usize as u64;
+    let pid = std::process::id();
+    let info = std::env::args()
+        .nth(2)
+        .unwrap_or_else(|| "dbg_target.info".to_string());
+    std::thread::spawn(move || loop {
+        let ptr = counter as *mut u64;
+        unsafe {
+            ptr.write_volatile(ptr.read_volatile().wrapping_add(1));
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    });
+    let _ = std::fs::write(&info, format!("pid={pid}\naddr={addr:X}\n"));
+    loop {
+        std::thread::sleep(std::time::Duration::from_secs(3600));
+    }
 }
 
 fn describe_error(code: u32) -> &'static str {
