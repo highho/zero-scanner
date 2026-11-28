@@ -521,8 +521,52 @@ pub fn run() -> bool {
                 "presets: a recipe carries no scanned value"
             );
         }
-        // The two new MCP tools must be declared, or an agent cannot use them.
-        for expected in ["zero_aliases", "zero_symbols", "zero_presets"] {
+        // Snapshot diff: what a second scan tells you about the first one.
+    {
+        use crate::model::{ScanHit, Value, VType};
+        use crate::snapshot;
+        let hits = vec![
+            ScanHit { address: 0x1000, vtype: VType::I32, value: Value::Int(100), previous: None },
+            ScanHit { address: 0x2000, vtype: VType::I32, value: Value::Int(7), previous: None },
+        ];
+        let snap = snapshot::take("关卡一", "game.exe", "首次 · 精确值", &hits);
+        let later = vec![
+            ScanHit { address: 0x1000, vtype: VType::I32, value: Value::Int(88), previous: Some(Value::Int(100)) },
+            ScanHit { address: 0x3000, vtype: VType::I32, value: Value::Int(5), previous: None },
+        ];
+        let diff = snapshot::diff(&snap, &later);
+        check!(
+            diff.kept == vec![0x1000] && diff.gone == vec![0x2000] && diff.added == vec![0x3000],
+            "snapshot: a second scan splits addresses into kept / gone / added"
+        );
+        check!(
+            diff.summary() == "1 个仍在 · 1 个消失 · 1 个新出现",
+            "snapshot: the summary reads like a sentence ({})",
+            diff.summary()
+        );
+        check!(
+            diff.report(12).contains("0000000000001000"),
+            "snapshot: the report lists the surviving addresses"
+        );
+        check!(
+            snap.describe(snapshot::now_secs()).contains("2 个地址"),
+            "snapshot: a saved snapshot states how many addresses it holds"
+        );
+        let mut list = Vec::new();
+        snapshot::upsert(&mut list, snapshot::take("A", "game.exe", "首次", &hits));
+        let replaced = snapshot::upsert(&mut list, snapshot::take("a", "game.exe", "首次", &later));
+        check!(
+            replaced && list.len() == 1,
+            "snapshot: saving the same name again replaces it instead of piling up"
+        );
+        check!(
+            snapshot::find(&list, "  A  ").is_some(),
+            "snapshot: a name is found regardless of case and padding"
+        );
+    }
+    // Every MCP tool the docs promise must actually be declared, or an agent
+        // reading the tool list cannot call it.
+        for expected in ["zero_aliases", "zero_symbols", "zero_presets", "zero_snapshots"] {
             check!(
                 names.iter().any(|n| n == expected),
                 "MCP exposes {} ({})",

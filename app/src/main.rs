@@ -27,6 +27,7 @@ mod scanpreset;
 mod selftest;
 mod session;
 mod smart;
+mod snapshot;
 mod speed;
 mod structs;
 mod syms;
@@ -273,8 +274,9 @@ fn main() -> eframe::Result<()> {
         }
     }
 
+    let window_size = parse_window_size(&args).unwrap_or([1440.0, 960.0]);
     let mut viewport = egui::ViewportBuilder::default()
-        .with_inner_size([1440.0, 960.0])
+        .with_inner_size(window_size)
         .with_min_inner_size([1120.0, 720.0])
         .with_title("Zero · 智能内存工作台")
         .with_active(screenshot.is_none())
@@ -370,6 +372,28 @@ fn parse_theme(args: &[String]) -> Option<String> {
         }
         if let Some(value) = args[i].strip_prefix("--theme=") {
             return Some(value.to_string());
+        }
+        i += 1;
+    }
+    None
+}
+
+fn parse_window_size(args: &[String]) -> Option<[f32; 2]> {
+    let mut i = 0;
+    while i < args.len() {
+        let value = if args[i] == "--size" {
+            args.get(i + 1).map(|s| s.as_str())
+        } else {
+            args[i].strip_prefix("--size=")
+        };
+        if let Some(value) = value {
+            let mut parts = value.split(['x', 'X', ',']);
+            let w = parts.next().and_then(|v| v.parse::<f32>().ok())?;
+            let h = parts.next().and_then(|v| v.parse::<f32>().ok())?;
+            if w >= 640.0 && h >= 480.0 {
+                return Some([w, h]);
+            }
+            return None;
         }
         i += 1;
     }

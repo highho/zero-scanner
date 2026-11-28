@@ -63,6 +63,17 @@ pub struct Toast {
     pub at: Instant,
 }
 
+/// Which card the scan page's narrow right rail shows. The rail is 322 px
+/// wide and the window is 960 px tall, so three stacked cards never fit: the
+/// last one was always clipped below the fold. One card at a time, switched
+/// by a tab row, keeps every panel reachable without scrolling the whole page.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum RailTab {
+    Assistant,
+    Presets,
+    Snapshots,
+}
+
 pub struct Entry {
     pub id: u64,
     pub desc: String,
@@ -278,12 +289,20 @@ pub struct ZeroApp {
     /// Name of the preset last applied, so the page can show which recipe is
     /// currently in effect instead of guessing from the controls.
     pub preset_active: String,
-    /// Whether the preset strip is expanded. Collapsed by default so the scan
-    /// page keeps its one-job focus for someone who never saves a recipe.
-    pub presets_open: bool,
     /// Name typed into the save box, and the last preset error.
     pub preset_name: String,
     pub preset_error: Option<String>,
+
+    /// Saved scan snapshots, newest first. Taking one costs nothing and turns
+    /// the next scan into a comparison instead of a fresh mystery.
+    pub snapshots: Vec<crate::snapshot::Snapshot>,
+    /// Name typed into the snapshot box.
+    pub snapshot_name: String,
+    /// Result of the last comparison, kept so the page can show the counts
+    /// after the toast is gone.
+    pub snapshot_diff: Option<crate::snapshot::Diff>,
+    /// Which rail card the scan page shows (assistant / recipes / snapshots).
+    pub rail_tab: RailTab,
 
     pub workspace_path: String,
     pub show_hotkeys: bool,
@@ -437,9 +456,12 @@ impl ZeroApp {
             scan_hot_only: false,
             presets: crate::scanpreset::load(),
             preset_active: String::new(),
-            presets_open: false,
             preset_name: String::new(),
             preset_error: None,
+            snapshots: crate::snapshot::load(),
+            snapshot_name: String::new(),
+            snapshot_diff: None,
+            rail_tab: RailTab::Assistant,
             workspace_path: workspace_path(),
             show_hotkeys: false,
             mcp: None,
@@ -552,9 +574,22 @@ impl ZeroApp {
             app.scan_elapsed = Duration::from_millis(412);
             app.scan_threads = 8;
             app.scan_bytes = 96 * 1024 * 1024;
-            // 截图里要看到「我的搜法」展开后的样子。
-            app.presets_open = true;
+            // 截图里要看到「对比」页签下的样子。
             app.preset_active = "精确值 · 4 字节".to_string();
+            app.rail_tab = RailTab::Snapshots;
+            app.snapshots = vec![crate::snapshot::Snapshot {
+                name: "进入关卡时".to_string(),
+                process_name: "game.exe".to_string(),
+                kind: "首次 · 精确值".to_string(),
+                taken_at: crate::snapshot::now_secs().saturating_sub(7200),
+                rows: Vec::new(),
+            }];
+            app.snapshot_diff = Some(crate::snapshot::Diff {
+                name: "进入关卡时".to_string(),
+                kept: vec![0x7FF6_A1B2_C010, 0x7FF6_A1B2_C0A4],
+                gone: vec![0x7FF6_A1B2_C2D8],
+                added: vec![0x7FF6_A1B2_C3E0],
+            });
             app.ptr_paths = vec![
                 pointerscan::PointerPath {
                     base: pointerscan::StaticBase {
@@ -2103,6 +2138,68 @@ impl ZeroApp {
             Err(e) => self.preset_error = Some(e),
         }
     }
+/// Save the current hit list as a named snapshot.
+    pub fn take_snapshot(&mut self) {
+        if self.hits.is_empty() {
+            self.toast("还没有扫描结果可以存。先做一次扫描。", ToastKind::Warn);
+            return;
+        }
+        let name = if self.snapshot_name.trim().is_empty() {
+            format!("扫描 {}", self.snapshots.len() + 1)
+        } else {
+            self.snapshot_name.trim().to_string()
+        };
+        let snapshot = crate::snapshot::take(&name, &self.process_name, &self.last_scan_kind, &self.hits);
+        let count = snapshot.rows.len();
+        let replaced = crate::snapshot::upsert(&mut self.snapshots, snapshot);
+        match crate::snapshot::save(&self.snapshots) {
+            Ok(()) => {
+                self.snapshot_name.clear();
+                self.toast(
+                    format!(
+                        "{}快照「{}」：{} 个地址",
+                        if replaced { "已覆盖" } else { "已保存" },
+                        name,
+                        count
+                    ),
+                    ToastKind::Success,
+                );
+            }
+            Err(e) => self.toast(e, ToastKind::Error),
+        }
+    }
+
+    /// Compare a saved snapshot against the current candidates.
+    pub fn compare_snapshot(&mut self, index: usize) {
+        let Some(snapshot) = self.snapshots.get(index).cloned() else {
+            return;
+        };
+        if self.hits.is_empty() {
+            self.toast("还没有当前候选可以对比。先扫描一次。", ToastKind::Warn);
+            return;
+        }
+        let diff = crate::snapshot::diff(&snapshot, &self.hits);
+        let line = diff.summary();
+        self.toast(format!("对比「{}」：{}", snapshot.name, line), ToastKind::Info);
+        self.snapshot_diff = Some(diff);
+    }
+
+    pub fn delete_snapshot(&mut self, index: usize) {
+        if index >= self.snapshots.len() {
+            return;
+        }
+        let removed = self.snapshots.remove(index);
+        if let Some(diff) = &self.snapshot_diff {
+            if diff.name == removed.name {
+                self.snapshot_diff = None;
+            }
+        }
+        match crate::snapshot::save(&self.snapshots) {
+            Ok(()) => self.toast(format!("已删除快照「{}」", removed.name), ToastKind::Info),
+            Err(e) => self.toast(e, ToastKind::Error),
+        }
+    }
+
     pub fn spawn_practice(&mut self) {
         if let Some(child) = &mut self.practice_child {
             if child.try_wait().ok().flatten().is_none() {

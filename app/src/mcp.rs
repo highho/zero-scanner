@@ -524,6 +524,17 @@ fn tool_definitions() -> Vec<Json> {
                 }
             }
         }),        json!({
+            "name": "zero_snapshots",
+            "description": "扫描快照与对比。action=save 把当前候选存成一份快照（给个 name）；action=list 列出存过的；action=diff 与当前候选做差集，回答「哪些地址活了下来、哪些消失、哪些新出现」；action=remove 删掉一份。",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "action": { "type": "string", "description": "save / list / diff / remove，默认 list" },
+                    "name": { "type": "string", "description": "快照名字；save 省略时按序号自动起名" }
+                },
+                "required": ["action"]
+            }
+        }),        json!({
             "name": "zero_symbols",
             "description": "列出已加载模块的导出/导入符号，或把一个地址反查成最近的导出名（module!Name+0x12）。module 省略时查所有模块的导出。",
             "inputSchema": {
@@ -1074,11 +1085,6 @@ fn call_tool(name: &str, args: &Json, engine: &Arc<Mutex<Engine>>) -> Result<Str
                     if regions.is_empty() {
                         return Err("目标进程没有可读内存区".to_string());
                     }
-                    let max_results = if preset.max_results > 0 {
-                        preset.max_results
-                    } else {
-                        400_000
-                    };
                     Ok(format!(
                         "已套用搜法「{}」：{}。\n下一步：zero_scan 带上你要找的数值（这次扫描用 {} / {}）。",
                         preset.name,
@@ -1145,6 +1151,99 @@ fn call_tool(name: &str, args: &Json, engine: &Arc<Mutex<Engine>>) -> Result<Str
                     Ok(format!("已删除搜法「{}」", name.trim()))
                 }
                 other => Err(format!("未知 action：{other}（list / apply / save / remove）")),
+            }
+        }
+        "zero_snapshots" => {
+            let action = args.get("action").and_then(|a| a.as_str()).unwrap_or("list");
+            match action {
+                "list" => {
+                    let list = crate::snapshot::load();
+                    if list.is_empty() {
+                        return Ok("还没有快照。扫描之后 action=save&name=… 存一份，下次扫描完 action=diff 就能看出哪些地址活了下来。".to_string());
+                    }
+                    let now = crate::snapshot::now_secs();
+                    let mut text = format!("{} 份快照：", list.len());
+                    for (i, snapshot) in list.iter().enumerate() {
+                        text.push_str(&format!("\n  {}. {} — {}", i + 1, snapshot.name, snapshot.describe(now)));
+                    }
+                    text.push_str("\n\n对比：action=diff&name=…（拿它和当前候选做差集）");
+                    Ok(text)
+                }
+                "save" => {
+                    let hits = {
+                        let guard = engine.lock().map_err(|_| "引擎状态不可用".to_string())?;
+                        guard.hits.clone()
+                    };
+                    if hits.is_empty() {
+                        return Err("还没有扫描结果可以存，先调用 zero_scan".to_string());
+                    }
+                    let mut list = crate::snapshot::load();
+                    let name = args
+                        .get("name")
+                        .and_then(|n| n.as_str())
+                        .map(|n| n.trim().to_string())
+                        .filter(|n| !n.is_empty())
+                        .unwrap_or_else(|| format!("扫描 {}", list.len() + 1));
+                    let process_name = {
+                        let guard = engine.lock().map_err(|_| "引擎状态不可用".to_string())?;
+                        guard
+                            .handle
+                            .as_ref()
+                            .map(|h| h.name.clone())
+                            .unwrap_or_default()
+                    };
+                    let kind = {
+                        let guard = engine.lock().map_err(|_| "引擎状态不可用".to_string())?;
+                        guard.last_kind.clone()
+                    };
+                    let count = hits.len();
+                    let replaced = crate::snapshot::upsert(
+                        &mut list,
+                        crate::snapshot::take(&name, &process_name, &kind, &hits),
+                    );
+                    crate::snapshot::save(&list)?;
+                    Ok(format!(
+                        "{}快照「{}」：{} 个地址。\n下次扫描后调 action=diff&name={} 就能看出谁活了下来。",
+                        if replaced { "已覆盖" } else { "已保存" },
+                        name,
+                        count,
+                        name
+                    ))
+                }
+                "diff" => {
+                    let name = args
+                        .get("name")
+                        .and_then(|n| n.as_str())
+                        .ok_or_else(|| "diff 需要 name".to_string())?;
+                    let list = crate::snapshot::load();
+                    let snapshot = crate::snapshot::find(&list, name).ok_or_else(|| {
+                        format!("没有叫「{name}」的快照。先用 action=list 看看有哪些。")
+                    })?;
+                    let hits = {
+                        let guard = engine.lock().map_err(|_| "引擎状态不可用".to_string())?;
+                        guard.hits.clone()
+                    };
+                    if hits.is_empty() {
+                        return Err("还没有当前候选可以对比，先做一次扫描".to_string());
+                    }
+                    let diff = crate::snapshot::diff(snapshot, &hits);
+                    Ok(diff.report(12))
+                }
+                "remove" => {
+                    let name = args
+                        .get("name")
+                        .and_then(|n| n.as_str())
+                        .ok_or_else(|| "remove 需要 name".to_string())?;
+                    let mut list = crate::snapshot::load();
+                    let before = list.len();
+                    list.retain(|s| !s.name.eq_ignore_ascii_case(name.trim()));
+                    if list.len() == before {
+                        return Err(format!("没有叫「{name}」的快照"));
+                    }
+                    crate::snapshot::save(&list)?;
+                    Ok(format!("已删除快照「{}」，还剩 {} 份", name.trim(), list.len()))
+                }
+                other => Err(format!("未知 action：{other}（save / list / diff / remove）")),
             }
         }
         "zero_symbols" => {

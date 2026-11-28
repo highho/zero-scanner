@@ -1,4 +1,4 @@
-use crate::app::{EditState, ScanPhase, Tab, ZeroApp};
+use crate::app::{EditState, RailTab, ScanPhase, Tab, ZeroApp};
 use crate::debugger::{self, DebugSession, BpKind, Slot};
 use crate::model::{format_bytes, parse_address, ScanType, VType};
 use crate::disasm;
@@ -737,6 +737,7 @@ impl ZeroApp {
         let full = ui.available_width();
         let right_w = 322.0;
         let left_w = (full - right_w - 14.0).max(520.0);
+        let rail_h = ui.available_height();
         ui.horizontal_top(|ui| {
             ui.vertical(|ui| {
                 ui.set_width(left_w);
@@ -745,9 +746,50 @@ impl ZeroApp {
             ui.add_space(14.0);
             ui.vertical(|ui| {
                 ui.set_width(right_w);
-                self.assistant_side(ui);
-                ui.add_space(10.0);
-                self.preset_side(ui);
+                // 右栏只有 322 px 宽、窗口 960 px 高，三张卡叠着放最后一张
+                // 一定被挤出底部。改成一行页签，一次只画一张。
+                ui.horizontal(|ui| {
+                    if theme::pill(ui, "助手", self.rail_tab == RailTab::Assistant).clicked() {
+                        self.rail_tab = RailTab::Assistant;
+                    }
+                    if theme::pill(ui, "搜法", self.rail_tab == RailTab::Presets).clicked() {
+                        self.rail_tab = RailTab::Presets;
+                    }
+                    if theme::pill(ui, "对比", self.rail_tab == RailTab::Snapshots).clicked() {
+                        self.rail_tab = RailTab::Snapshots;
+                    }
+                });
+                ui.add_space(8.0);
+                // 助手卡本身就有一屏高，加上页签后仍可能顶到底边；给右栏一个
+                // 明确的可用高度，超了就滚动，别让内容被窗口裁掉。
+                let rail = egui::ScrollArea::vertical()
+                    .id_source("scan_rail")
+                    .max_height(rail_h)
+                    .auto_shrink([false, false])
+                    .show(ui, |ui| {
+                        ui.set_width(right_w);
+                        match self.rail_tab {
+                            RailTab::Assistant => self.assistant_side(ui),
+                            RailTab::Presets => self.preset_side(ui),
+                            RailTab::Snapshots => self.snapshot_side(ui),
+                        }
+                    });
+                // 右栏空间是算出来的，不是猜的：三张卡高度差很多，卡片比可视区
+                // 高就该滚动。把数字打出来，截图验证时才有得核对。
+                if std::env::var("ZERO_DEBUG_LAYOUT").is_ok() {
+                    eprintln!(
+                        "rail tab={} content={:.1} visible={:.1} budget={:.1} overflows={}",
+                        match self.rail_tab {
+                            RailTab::Assistant => "assistant",
+                            RailTab::Presets => "presets",
+                            RailTab::Snapshots => "snapshots",
+                        },
+                        rail.content_size.y,
+                        rail.inner_rect.height(),
+                        rail_h,
+                        rail.content_size.y > rail.inner_rect.height() + 1.0
+                    );
+                }
             });
         });
 
@@ -1023,19 +1065,6 @@ impl ZeroApp {
             });
             ui.add_space(6.0);
 
-            if !self.presets_open {
-                ui.label(
-                    egui::RichText::new("把常用的类型与条件存成一套，下次一键套用。")
-                        .size(11.0)
-                        .color(theme::muted()),
-                );
-                ui.add_space(5.0);
-                if theme::outline_button(ui, "展开搜法", true).clicked() {
-                    self.presets_open = true;
-                }
-                return;
-            }
-
             for (index, preset) in self.presets.iter().enumerate() {
                 let active = self.preset_active == preset.name;
                 ui.horizontal(|ui| {
@@ -1075,10 +1104,6 @@ impl ZeroApp {
             if let Some(error) = &self.preset_error {
                 ui.add_space(3.0);
                 ui.label(egui::RichText::new(error).size(10.5).color(theme::danger()));
-            }
-            ui.add_space(3.0);
-            if theme::outline_button(ui, "收起", true).clicked() {
-                self.presets_open = false;
             }
         });
 
@@ -1214,6 +1239,96 @@ impl ZeroApp {
                 );
             }
         });
+    }
+
+/// Saved scan snapshots: take one, then compare the next scan against it.
+    fn snapshot_side(&mut self, ui: &mut egui::Ui) {
+        let mut take = false;
+        let mut compare: Option<usize> = None;
+        let mut delete: Option<usize> = None;
+        let now = crate::snapshot::now_secs();
+        let has_hits = !self.hits.is_empty();
+        theme::card_frame().show(ui, |ui| {
+            ui.horizontal(|ui| {
+                ui.label(egui::RichText::new("扫描对比").size(14.5).strong());
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    theme::tag(ui, &format!("{} 份快照", self.snapshots.len()), theme::faint());
+                });
+            });
+            ui.add_space(4.0);
+            ui.label(
+                egui::RichText::new("存一份现在的候选。下次扫描后对比，就能看出哪些地址活了下来。")
+                    .size(10.5)
+                    .color(theme::muted()),
+            );
+            ui.add_space(6.0);
+            ui.horizontal(|ui| {
+                ui.add_sized(
+                    [ui.available_width() - 84.0, 28.0],
+                    egui::TextEdit::singleline(&mut self.snapshot_name)
+                        .hint_text("给这份快照起个名字")
+                        .font(FontId::proportional(12.5)),
+                );
+                if theme::outline_button(ui, "存快照", has_hits).clicked() && has_hits {
+                    take = true;
+                }
+            });
+            if self.snapshots.is_empty() {
+                ui.add_space(4.0);
+                ui.label(
+                    egui::RichText::new("还没有快照。扫描之后存一份，之后就能做对比。")
+                        .size(10.5)
+                        .color(theme::faint()),
+                );
+            }
+            for (index, snapshot) in self.snapshots.iter().enumerate() {
+                ui.add_space(4.0);
+                ui.horizontal(|ui| {
+                    if theme::pill(ui, &snapshot.name, false).clicked() && has_hits {
+                        compare = Some(index);
+                    }
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        if theme::outline_button(ui, "删", true).clicked() {
+                            delete = Some(index);
+                        }
+                    });
+                });
+                ui.label(
+                    egui::RichText::new(snapshot.describe(now))
+                        .size(10.0)
+                        .color(theme::faint()),
+                );
+            }
+            if let Some(diff) = &self.snapshot_diff {
+                ui.add_space(6.0);
+                theme::divider(ui);
+                ui.add_space(5.0);
+                theme::section_label(ui, "上次对比");
+                ui.horizontal_wrapped(|ui| {
+                    theme::tag(ui, &format!("{} 个仍在", diff.kept.len()), theme::success());
+                    if !diff.gone.is_empty() {
+                        theme::tag(ui, &format!("{} 个消失", diff.gone.len()), theme::danger());
+                    }
+                    if !diff.added.is_empty() {
+                        theme::tag(ui, &format!("{} 个新出现", diff.added.len()), theme::accent_2());
+                    }
+                });
+                ui.label(
+                    egui::RichText::new(format!("对比的是「{}」", diff.name))
+                        .size(10.0)
+                        .color(theme::faint()),
+                );
+            }
+        });
+        if take {
+            self.take_snapshot();
+        }
+        if let Some(index) = compare {
+            self.compare_snapshot(index);
+        }
+        if let Some(index) = delete {
+            self.delete_snapshot(index);
+        }
     }
 
     fn results_panel(&mut self, ui: &mut egui::Ui) {
