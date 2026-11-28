@@ -480,8 +480,49 @@ pub fn run() -> bool {
             check!(aliases::remove("hp") && aliases::list().is_empty(), "an alias can be removed");
             aliases::clear();
         }
+        // Saved scan recipes: a recipe must never carry a value, or applying
+        // one would overwrite what the user just typed.
+        {
+            use crate::scanpreset;
+            let list = scanpreset::builtins();
+            check!(
+                list.len() == 3 && scanpreset::find(&list, "浮点坐标").is_some(),
+                "presets: three built-in recipes cover the first session ({} found)",
+                list.len()
+            );
+            let float = scanpreset::find(&list, "浮点坐标").unwrap();
+            check!(
+                float.vtype() == crate::model::VType::F32,
+                "presets: the coordinate recipe is a float ({} · {})",
+                float.vtype().short(),
+                float.scan_type().label()
+            );
+            let line = float.describe();
+            check!(
+                line.contains("仅可写内存"),
+                "presets: a recipe states its region filter ({})",
+                line
+            );
+            check!(
+                scanpreset::find(&list, "不存在的搜法").is_none(),
+                "presets: an unknown name is reported, not guessed"
+            );
+            let mut edited = list.clone();
+            let mut tweak = edited[0].clone();
+            tweak.fast = true;
+            let replaced = scanpreset::upsert(&mut edited, tweak);
+            check!(
+                replaced && edited.len() == 3 && edited[0].fast,
+                "presets: saving an existing name updates it in place ({} recipes)",
+                edited.len()
+            );
+            check!(
+                !serde_json::to_string(&list[0]).unwrap().contains("\"value\""),
+                "presets: a recipe carries no scanned value"
+            );
+        }
         // The two new MCP tools must be declared, or an agent cannot use them.
-        for expected in ["zero_aliases", "zero_symbols"] {
+        for expected in ["zero_aliases", "zero_symbols", "zero_presets"] {
             check!(
                 names.iter().any(|n| n == expected),
                 "MCP exposes {} ({})",

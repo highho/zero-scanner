@@ -174,6 +174,7 @@ zero-scanner.exe --update-apply-from <文件>     # 走一遍替换并重启（�
 | --- | --- |
 | 17 个工作区 | 扫描 / 地址列表 / 内存浏览 / 智能助手 / 练习靶场 / 指针扫描 / AOB 扫描 / 符号解析 / 反汇编 / 代码补丁 / 自动汇编 / CT 表格 / 变速齿轮 / Lua 脚本 / 结构浏览 / 调试器 / 内存热图 |
 | 工作区持久化 | 地址列表、补丁记录、观察候选与设置存在 exe 旁的 `zero-workspace.json`；文件损坏时降级为空，不会挡住启动 |
+| 扫描预设 | 常用的类型与条件存成一套（含只扫热区、只看可写），扫描页右栏一键套用；预设只描述「怎么搜」，不会覆盖你刚输入的数值 |
 | 断线重连 | 每条地址记着自己落在哪个模块、模块内偏移多少。游戏更新或重开（模块基址变了）后重新连接，地址按新基址重算；模块没了或变小了的行标红并计入「N 个失效」，不会悄悄指向别的东西。进程选择器把上次用的程序排最前 |
 | 快捷键 | 沿用 CE 的肌肉记忆：F5 再次扫描、Ctrl+Z 撤销、Ctrl+F 全部锁定……F1 呼出速查 |
 
@@ -215,7 +216,7 @@ MCP listening on http://127.0.0.1:3780/mcp?token=9f2c1d...（32 位随机串）
 - 不带 token 或 token 不对：一律 `401`。服务只监听 `127.0.0.1`，不对外。
 - 服务自持一个**独立引擎会话**（自己的进程句柄、扫描状态、补丁账本），不和 GUI 共享可变状态。
 
-### 18 个工具
+### 19 个工具
 
 | 分类 | 工具 | 能做什么 |
 | --- | --- | --- |
@@ -237,6 +238,7 @@ MCP listening on http://127.0.0.1:3780/mcp?token=9f2c1d...（32 位随机串）
 | 调试 | `zero_dbg_hits` | 列出最近的命中（RIP、指令、线程、写后值），`clear` 停止并清除 |
 | 地址 | `zero_aliases` | 地址别名的 `list` / `set` / `remove`，别名在所有地址框与 MCP 里自动展开 |
 | 符号 | `zero_symbols` | 列模块的导出/导入，或按地址反查最近的导出符号 |
+| 扫描 | `zero_presets` | 扫描预设的 `list` / `apply` / `save` / `remove`：把常用搜法存下来一键套用 |
 
 ### 客户端配置示例
 
@@ -262,7 +264,7 @@ MCP listening on http://127.0.0.1:3780/mcp?token=9f2c1d...（32 位随机串）
 | --- | --- |
 | `zero-scanner.exe` | 图形界面 |
 | `zero-scanner.exe --mcp <port>` | 无界面启动 MCP 服务（不写端口默认 3777） |
-| `zero-scanner.exe --selftest` | 跑 223 项自检，结论写 `selftest.log`，退出码即结果 |
+| `zero-scanner.exe --selftest` | 跑 230 项自检，结论写 `selftest.log`，退出码即结果 |
 | `zero-scanner.exe --verify <pid>` | 对目标进程做 8 项可用性验证 |
 | `zero-scanner.exe --e2e <pid> [info]` | 30 项端到端验证（配合 `e2e_target.py`） |
 | `zero-scanner.exe --screenshot <png> --tab <名字>` | 渲染某个页面为 PNG（界面回归用，加 `--settings` 连设置弹窗一起） |
@@ -343,9 +345,10 @@ MCP listening on http://127.0.0.1:3780/mcp?token=9f2c1d...（32 位随机串）
 │     ├─ prefs.rs        设置
 │     ├─ session.rs      工作区持久化
 │     ├─ rebase.rs       重连后按新模块基址重算地址
+│     ├─ scanpreset.rs   扫描预设（常用搜法一键套用）
 │     ├─ hotkey.rs       快捷键
 │     ├─ mcp.rs          MCP 服务
-│     ├─ selftest.rs     223 项自检
+│     ├─ selftest.rs     230 项自检
 │     ├─ e2e.rs          端到端验证
 │     └─ model.rs        值类型与扫描类型
 └─ e2e_target.py         端到端测试目标进程
@@ -385,7 +388,7 @@ bash installer/build.sh
 两条独立的证据线：**断言管逻辑，截图管渲染**。
 
 ```bash
-# 223 项自检：扫描 / 指针 / 反汇编 / 补丁 / 汇编 / CT / 分诊 / Lua / 更新 / 热图 / 调试 …
+# 230 项自检：扫描 / 指针 / 反汇编 / 补丁 / 汇编 / CT / 分诊 / Lua / 更新 / 热图 / 调试 …
 zero-scanner.exe --selftest
 
 # 30 项端到端：起一个真实目标进程，把整条链路跑一遍

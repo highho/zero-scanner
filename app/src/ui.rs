@@ -746,6 +746,8 @@ impl ZeroApp {
             ui.vertical(|ui| {
                 ui.set_width(right_w);
                 self.assistant_side(ui);
+                ui.add_space(10.0);
+                self.preset_side(ui);
             });
         });
 
@@ -1002,6 +1004,94 @@ impl ZeroApp {
         }
     }
 
+
+    /// Saved search recipes, kept in the right column so the scan card stays
+    /// about one job. Collapsed until the user shows interest: someone doing a
+    /// single scan should not have to read a list of recipes first.
+    fn preset_side(&mut self, ui: &mut egui::Ui) {
+        let mut apply: Option<usize> = None;
+        let mut delete: Option<usize> = None;
+        let mut save = false;
+        theme::card_frame().show(ui, |ui| {
+            ui.horizontal(|ui| {
+                let (rect, _) = ui.allocate_exact_size(Vec2::splat(20.0), Sense::hover());
+                theme::paint_icon(ui.painter(), rect.shrink(2.0), IconKind::Scan, theme::accent());
+                ui.label(egui::RichText::new("我的搜法").size(14.5).strong());
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    theme::tag(ui, &format!("{} 套", self.presets.len()), theme::accent_2());
+                });
+            });
+            ui.add_space(6.0);
+
+            if !self.presets_open {
+                ui.label(
+                    egui::RichText::new("把常用的类型与条件存成一套，下次一键套用。")
+                        .size(11.0)
+                        .color(theme::muted()),
+                );
+                ui.add_space(5.0);
+                if theme::outline_button(ui, "展开搜法", true).clicked() {
+                    self.presets_open = true;
+                }
+                return;
+            }
+
+            for (index, preset) in self.presets.iter().enumerate() {
+                let active = self.preset_active == preset.name;
+                ui.horizontal(|ui| {
+                    if theme::pill(ui, &preset.name, active).clicked() {
+                        apply = Some(index);
+                    }
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        if theme::outline_button(ui, "删", true).clicked() {
+                            delete = Some(index);
+                        }
+                    });
+                });
+                if !preset.note.is_empty() {
+                    ui.label(
+                        egui::RichText::new(&preset.note).size(10.0).color(theme::faint()),
+                    );
+                }
+                ui.label(
+                    egui::RichText::new(preset.describe()).size(10.0).color(theme::muted()),
+                );
+                ui.add_space(4.0);
+            }
+
+            theme::divider(ui);
+            ui.add_space(5.0);
+            ui.horizontal(|ui| {
+                ui.add_sized(
+                    [ui.available_width() - 96.0, 28.0],
+                    egui::TextEdit::singleline(&mut self.preset_name)
+                        .hint_text("给这套搜法起个名字")
+                        .font(FontId::proportional(12.5)),
+                );
+                if theme::outline_button(ui, "存为搜法", true).clicked() {
+                    save = true;
+                }
+            });
+            if let Some(error) = &self.preset_error {
+                ui.add_space(3.0);
+                ui.label(egui::RichText::new(error).size(10.5).color(theme::danger()));
+            }
+            ui.add_space(3.0);
+            if theme::outline_button(ui, "收起", true).clicked() {
+                self.presets_open = false;
+            }
+        });
+
+        if let Some(index) = apply {
+            self.apply_scan_preset(index);
+        }
+        if let Some(index) = delete {
+            self.delete_scan_preset(index);
+        }
+        if save {
+            self.save_scan_preset();
+        }
+    }
     fn assistant_side(&mut self, ui: &mut egui::Ui) {
         theme::card_frame().show(ui, |ui| {
             ui.horizontal(|ui| {

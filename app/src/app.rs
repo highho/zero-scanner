@@ -272,6 +272,19 @@ pub struct ZeroApp {
     /// curiosity into a shortcut: the first scan stops walking dead weight.
     pub scan_hot_only: bool,
 
+    /// Saved search recipes. Loaded once at startup from the per-user data
+    /// folder; the three built-ins stand in when the file is missing.
+    pub presets: Vec<crate::scanpreset::ScanPreset>,
+    /// Name of the preset last applied, so the page can show which recipe is
+    /// currently in effect instead of guessing from the controls.
+    pub preset_active: String,
+    /// Whether the preset strip is expanded. Collapsed by default so the scan
+    /// page keeps its one-job focus for someone who never saves a recipe.
+    pub presets_open: bool,
+    /// Name typed into the save box, and the last preset error.
+    pub preset_name: String,
+    pub preset_error: Option<String>,
+
     pub workspace_path: String,
     pub show_hotkeys: bool,
     pub mcp: Option<mcp::Service>,
@@ -422,6 +435,11 @@ impl ZeroApp {
             heat_interval: 1.0,
             heat_last: None,
             scan_hot_only: false,
+            presets: crate::scanpreset::load(),
+            preset_active: String::new(),
+            presets_open: false,
+            preset_name: String::new(),
+            preset_error: None,
             workspace_path: workspace_path(),
             show_hotkeys: false,
             mcp: None,
@@ -534,6 +552,9 @@ impl ZeroApp {
             app.scan_elapsed = Duration::from_millis(412);
             app.scan_threads = 8;
             app.scan_bytes = 96 * 1024 * 1024;
+            // 截图里要看到「我的搜法」展开后的样子。
+            app.presets_open = true;
+            app.preset_active = "精确值 · 4 字节".to_string();
             app.ptr_paths = vec![
                 pointerscan::PointerPath {
                     base: pointerscan::StaticBase {
@@ -2007,6 +2028,81 @@ impl ZeroApp {
         );
     }
 
+
+    /// Apply a saved recipe. It only touches *how* to search: the value the
+    /// user typed stays put, so a recipe can never quietly replace their input.
+    pub fn apply_scan_preset(&mut self, index: usize) {
+        let Some(preset) = self.presets.get(index).cloned() else {
+            return;
+        };
+        self.vtype = preset.vtype();
+        self.scan_type = preset.scan_type();
+        self.fast = preset.fast;
+        self.writable_only = preset.writable_only;
+        self.scan_hot_only = preset.hot_only;
+        if preset.max_results > 0 {
+            self.max_results = preset.max_results;
+        }
+        self.preset_active = preset.name.clone();
+        self.preset_error = None;
+        self.tab = Tab::Scan;
+        self.toast(
+            format!("已套用搜法「{}」：{}", preset.name, preset.describe()),
+            ToastKind::Info,
+        );
+    }
+
+    /// Capture the current controls as a named recipe.
+    pub fn save_scan_preset(&mut self) {
+        let name = self.preset_name.trim().to_string();
+        if name.is_empty() {
+            self.preset_error = Some("先给这套搜法起个名字。".to_string());
+            return;
+        }
+        let preset = crate::scanpreset::ScanPreset {
+            name: name.clone(),
+            note: String::new(),
+            vtype: crate::scanpreset::vtype_name(self.vtype).to_string(),
+            scan_type: crate::scanpreset::scan_type_name(self.scan_type).to_string(),
+            fast: self.fast,
+            writable_only: self.writable_only,
+            hot_only: self.scan_hot_only,
+            max_results: self.max_results,
+        };
+        let replaced = crate::scanpreset::upsert(&mut self.presets, preset);
+        match crate::scanpreset::save(&self.presets) {
+            Ok(()) => {
+                self.preset_active = name.clone();
+                self.preset_name.clear();
+                self.preset_error = None;
+                self.toast(
+                    format!(
+                        "{}搜法「{name}」",
+                        if replaced { "已更新" } else { "已保存" }
+                    ),
+                    ToastKind::Success,
+                );
+            }
+            Err(e) => self.preset_error = Some(e),
+        }
+    }
+
+    pub fn delete_scan_preset(&mut self, index: usize) {
+        if index >= self.presets.len() {
+            return;
+        }
+        let removed = self.presets.remove(index);
+        if self.preset_active == removed.name {
+            self.preset_active.clear();
+        }
+        match crate::scanpreset::save(&self.presets) {
+            Ok(()) => {
+                self.preset_error = None;
+                self.toast(format!("已删除搜法「{}」", removed.name), ToastKind::Info);
+            }
+            Err(e) => self.preset_error = Some(e),
+        }
+    }
     pub fn spawn_practice(&mut self) {
         if let Some(child) = &mut self.practice_child {
             if child.try_wait().ok().flatten().is_none() {

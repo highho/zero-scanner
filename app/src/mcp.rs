@@ -507,6 +507,23 @@ fn tool_definitions() -> Vec<Json> {
             }
         }),
         json!({
+            "name": "zero_presets",
+            "description": "保存的搜法（扫描预设）。action=list 列出；action=apply 套用一套（只改类型与条件，不改数值）；action=save 按给定参数存一套；action=remove 删掉一套。",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "action": { "type": "string", "description": "list / apply / save / remove，默认 list" },
+                    "name": { "type": "string", "description": "搜法名字" },
+                    "note": { "type": "string", "description": "action=save 时的一句话说明" },
+                    "vtype": { "type": "string", "description": "action=save 时：i8/i16/i32/i64/f32/f64/str/auto" },
+                    "mode": { "type": "string", "description": "action=save 时：exact/bigger/smaller/between/unknown/increased/decreased/changed/unchanged" },
+                    "fast": { "type": "boolean", "description": "action=save 时是否快速扫描" },
+                    "writable_only": { "type": "boolean", "description": "action=save 时是否只看可写内存，默认 true" },
+                    "hot_only": { "type": "boolean", "description": "action=save 时是否只扫热区" },
+                    "max_results": { "type": "integer", "description": "action=save 时的结果上限，0 表示用默认值" }
+                }
+            }
+        }),        json!({
             "name": "zero_symbols",
             "description": "列出已加载模块的导出/导入符号，或把一个地址反查成最近的导出名（module!Name+0x12）。module 省略时查所有模块的导出。",
             "inputSchema": {
@@ -1027,6 +1044,107 @@ fn call_tool(name: &str, args: &Json, engine: &Arc<Mutex<Engine>>) -> Result<Str
                     }
                 }
                 other => Err(format!("未知 action：{other}（list / set / remove）")),
+            }
+        }
+        "zero_presets" => {
+            let action = args.get("action").and_then(|a| a.as_str()).unwrap_or("list");
+            match action {
+                "list" => {
+                    let list = crate::scanpreset::load();
+                    let mut text = format!("{} 套搜法：", list.len());
+                    for (i, p) in list.iter().enumerate() {
+                        text.push_str(&format!("\n  {}. {} — {}", i + 1, p.name, p.describe()));
+                        if !p.note.is_empty() {
+                            text.push_str(&format!("（{}）", p.note));
+                        }
+                    }
+                    text.push_str("\n\n套用：action=apply&name=…；保存：action=save&name=…（按当前参数）");
+                    Ok(text)
+                }
+                "apply" => {
+                    let name = args
+                        .get("name")
+                        .and_then(|n| n.as_str())
+                        .ok_or_else(|| "apply 需要 name".to_string())?;
+                    let list = crate::scanpreset::load();
+                    let preset = crate::scanpreset::find(&list, name)
+                        .ok_or_else(|| format!("没有叫「{name}」的搜法。先用 action=list 看看有哪些。"))?;
+                    let handle = engine_handle(engine)?;
+                    let regions = handle.regions(preset.writable_only);
+                    if regions.is_empty() {
+                        return Err("目标进程没有可读内存区".to_string());
+                    }
+                    let max_results = if preset.max_results > 0 {
+                        preset.max_results
+                    } else {
+                        400_000
+                    };
+                    Ok(format!(
+                        "已套用搜法「{}」：{}。\n下一步：zero_scan 带上你要找的数值（这次扫描用 {} / {}）。",
+                        preset.name,
+                        preset.describe(),
+                        preset.vtype().short(),
+                        preset.scan_type().label()
+                    ))
+                }
+                "save" => {
+                    let name = args
+                        .get("name")
+                        .and_then(|n| n.as_str())
+                        .ok_or_else(|| "save 需要 name".to_string())?;
+                    let preset = crate::scanpreset::ScanPreset {
+                        name: name.trim().to_string(),
+                        note: args
+                            .get("note")
+                            .and_then(|n| n.as_str())
+                            .unwrap_or("")
+                            .to_string(),
+                        vtype: crate::scanpreset::vtype_name(vtype_of(
+                            args.get("vtype").and_then(|v| v.as_str()).unwrap_or("i32"),
+                        ))
+                        .to_string(),
+                        scan_type: crate::scanpreset::scan_type_name(scan_type_of(
+                            args.get("mode").and_then(|v| v.as_str()).unwrap_or("exact"),
+                        ))
+                        .to_string(),
+                        fast: args.get("fast").and_then(|v| v.as_bool()).unwrap_or(false),
+                        writable_only: args
+                            .get("writable_only")
+                            .and_then(|v| v.as_bool())
+                            .unwrap_or(true),
+                        hot_only: args
+                            .get("hot_only")
+                            .and_then(|v| v.as_bool())
+                            .unwrap_or(false),
+                        max_results: args
+                            .get("max_results")
+                            .and_then(|v| v.as_u64())
+                            .unwrap_or(0) as usize,
+                    };
+                    let mut list = crate::scanpreset::load();
+                    let replaced = crate::scanpreset::upsert(&mut list, preset);
+                    crate::scanpreset::save(&list)?;
+                    Ok(format!(
+                        "{}搜法「{}」",
+                        if replaced { "已更新" } else { "已保存" },
+                        name.trim()
+                    ))
+                }
+                "remove" => {
+                    let name = args
+                        .get("name")
+                        .and_then(|n| n.as_str())
+                        .ok_or_else(|| "remove 需要 name".to_string())?;
+                    let mut list = crate::scanpreset::load();
+                    let before = list.len();
+                    list.retain(|p| !p.name.eq_ignore_ascii_case(name.trim()));
+                    if list.len() == before {
+                        return Err(format!("没有叫「{name}」的搜法"));
+                    }
+                    crate::scanpreset::save(&list)?;
+                    Ok(format!("已删除搜法「{}」", name.trim()))
+                }
+                other => Err(format!("未知 action：{other}（list / apply / save / remove）")),
             }
         }
         "zero_symbols" => {

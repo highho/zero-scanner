@@ -23,6 +23,7 @@ mod practice;
 mod prefs;
 mod rebase;
 mod scan;
+mod scanpreset;
 mod selftest;
 mod session;
 mod smart;
