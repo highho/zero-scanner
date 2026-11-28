@@ -25,9 +25,9 @@
 
 | 文件 | 说明 |
 | --- | --- |
-| [`zero-scanner-1.1.0-setup-x64.exe`](https://github.com/highho/zero-scanner/releases/latest) | 安装版：**不需要管理员权限**，装进用户目录，带桌面 / 开始菜单快捷方式与卸载项 |
+| [`zero-scanner-1.2.0-setup-x64.exe`](https://github.com/highho/zero-scanner/releases/latest) | 安装版：**不需要管理员权限**，装进用户目录，带桌面 / 开始菜单快捷方式与卸载项 |
 | [`zero-scanner.exe`](https://github.com/highho/zero-scanner/releases/latest) | 便携版，单文件，双击即用 |
-| [`zero-scanner-v1.1.0-windows.zip`](https://github.com/highho/zero-scanner/releases/latest) | 同一份 exe + 说明文档与界面截图 |
+| [`zero-scanner-v1.2.0-windows.zip`](https://github.com/highho/zero-scanner/releases/latest) | 同一份 exe + 说明文档与界面截图 |
 
 - **三种拿法，一个二进制**：便携版直接跑；zip 解压即用；安装版会装到 `%LOCALAPPDATA%\Programs\Zero`，写开始菜单和桌面快捷方式，卸载时**保留你的 `zero-workspace.json`**（地址列表、补丁记录都在里面）。
 - **会自己更新**：装好之后，程序启动时自己检查新版本，一键下载替换、重启生效（走 `gh-proxy.com` 镜像，见 [自动更新](#自动更新)）。
@@ -358,7 +358,7 @@ cargo build --release
 ```bash
 cp app/target/release/zero-scanner.exe dist/
 bash installer/build.sh
-# 产物：dist/zero-scanner-1.1.0-setup-x64.exe
+# 产物：dist/zero-scanner-1.2.0-setup-x64.exe
 ```
 
 安装逻辑在 [`installer/Zero.nsi`](installer/Zero.nsi)（版本号在这里改），图标是 [`installer/zero.ico`](installer/zero.ico)（与 `app/icon/zero.ico` 是同一份文件）。安装包默认装到用户目录、申请的是用户级权限，所以整个流程不用弹 UAC。
