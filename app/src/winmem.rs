@@ -68,37 +68,60 @@ impl Drop for ProcessHandle {
 
 impl ProcessHandle {
     pub fn read(&self, address: u64, buffer: &mut [u8]) -> bool {
+        self.read_code(address, buffer).is_ok()
+    }
+
+    /// Same read, but the failure carries the Win32 code so the caller can
+    /// explain it instead of saying "cannot read" and stopping there.
+    pub fn read_code(&self, address: u64, buffer: &mut [u8]) -> Result<(), u32> {
         if buffer.is_empty() {
-            return true;
+            return Ok(());
         }
         let mut read = 0usize;
-        unsafe {
+        let ok = unsafe {
             ReadProcessMemory(
                 self.handle,
                 address as *const c_void,
                 buffer.as_mut_ptr() as *mut c_void,
                 buffer.len(),
                 &mut read,
-            ) != 0
-                && read == buffer.len()
+            )
+        } != 0;
+        if ok && read == buffer.len() {
+            return Ok(());
         }
+        // A short read reports success but leaves part of the buffer untouched;
+        // that is the same failure to the caller, and the code is still valid.
+        Err(unsafe { GetLastError() })
     }
 
     pub fn write(&self, address: u64, bytes: &[u8]) -> bool {
-        if !self.writable || bytes.is_empty() {
-            return false;
+        self.write_code(address, bytes).is_ok()
+    }
+
+    /// Same write, with the Win32 code on failure. A handle opened read-only
+    /// reports code 0, which the diagnosis table explains separately.
+    pub fn write_code(&self, address: u64, bytes: &[u8]) -> Result<(), u32> {
+        if !self.writable {
+            return Err(0);
+        }
+        if bytes.is_empty() {
+            return Ok(());
         }
         let mut written = 0usize;
-        unsafe {
+        let ok = unsafe {
             WriteProcessMemory(
                 self.handle,
                 address as *const c_void,
                 bytes.as_ptr() as *const c_void,
                 bytes.len(),
                 &mut written,
-            ) != 0
-                && written == bytes.len()
+            )
+        } != 0;
+        if ok && written == bytes.len() {
+            return Ok(());
         }
+        Err(unsafe { GetLastError() })
     }
 
     /// Read one pointer-sized value, using the target's own pointer width.

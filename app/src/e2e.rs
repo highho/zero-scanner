@@ -151,6 +151,17 @@ pub fn run(pid: u32, info_path: &str) -> bool {
         report.check(u32::from_le_bytes(restored) == 9900,
             "value restored to the original",
             || format!("read {} back", u32::from_le_bytes(restored)));
+
+        // A failure has to say what to do next. Reading a page that was never
+        // committed is the most common real failure, and it must come back as
+        // a diagnosis with an action, not a bare "cannot read".
+        let mut nowhere = [0u8; 16];
+        let err = handle.read_code(1, &mut nowhere).unwrap_err();
+        let diagnosis = crate::diag::for_read_memory(err);
+        report.check(!diagnosis.action.is_empty(),
+            "a failed read comes back as a diagnosis with a next step",
+            || format!("code {err} produced no action"));
+        report.note("unmapped read", &diagnosis.line());
     }
 
     if let Some(pointer) = coins_ptr {

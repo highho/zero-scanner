@@ -1926,6 +1926,34 @@ pub fn run() -> bool {
         );
     }
 
+    // Read and write failures must not share one sentence: "nothing is there"
+    // and "it is there but locked" lead to different next steps, and the whole
+    // point of the diagnosis table is that next step.
+    {
+        let read_487 = crate::diag::for_read_memory(487);
+        let write_487 = crate::diag::for_write_memory(487);
+        check!(
+            read_487.summary != write_487.summary,
+            "diag: a failed read and a failed write at the same code differ"
+        );
+        check!(
+            !read_487.action.is_empty() && !write_487.action.is_empty(),
+            "diag: both memory failures carry a next step"
+        );
+        let readonly = crate::diag::for_write_memory(0);
+        check!(
+            readonly.summary.contains("读取权限"),
+            "diag: a read-only handle explains itself instead of a bare zero ({})",
+            readonly.summary
+        );
+        let unknown = crate::diag::for_read_memory(4242);
+        check!(
+            unknown.summary.contains("4242"),
+            "diag: an unknown read code keeps the number for a bug report ({})",
+            unknown.summary
+        );
+    }
+
     // Hit-to-NOP: a hit record carries the instruction bytes it executed, so
     // the patch length must come from decoding those bytes, not from the
     // text form. Decode the exact sequence the dbg-test loop writes and

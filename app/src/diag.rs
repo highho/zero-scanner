@@ -59,6 +59,82 @@ pub fn for_open_process(code: u32) -> Diagnosis {
     }
 }
 
+/// 读目标进程内存失败时的诊断表。
+///
+/// 读失败几乎只有三类原因：地址根本没提交（487）、地址落在地图边界外（299，
+/// 与「已被调试」同码但场景不同）、以及目标已退出（5/31/87）。
+pub fn for_read_memory(code: u32) -> Diagnosis {
+    match code {
+        0 => Diagnosis::new(
+            "这次读取没有拿到完整字节。",
+            "地址可能正好跨在页尾；换成页内地址再试，或者先刷新区域列表。",
+        ),
+        5 => Diagnosis::new(
+            "拒绝访问：这块内存不允许当前权限读取。",
+            "以管理员身份重启 Zero，或换一个地址。",
+        ),
+        6 => Diagnosis::new(
+            "进程句柄已经失效。",
+            "目标可能已经退出，重新选择进程。",
+        ),
+        87 => Diagnosis::new("进程已经退出。", "刷新进程列表后重新连接。"),
+        299 => Diagnosis::new(
+            "这个地址没有映射到目标进程的内存里。",
+            "多半是偏移算错了，或那块内存已经被释放；回到地址列表核对基址与偏移。",
+        ),
+        487 => Diagnosis::new(
+            "这个地址没有提交（保留页或空洞）。",
+            "换一个地址；如果是结构体字段，先确认结构体基址对得上。",
+        ),
+        998 => Diagnosis::new(
+            "地址无效或没有读取权限。",
+            "确认进程还活着，并检查地址是否在模块范围内。",
+        ),
+        other => Diagnosis::new(
+            format!("无法读取内存（系统错误 {other}）。"),
+            "把这条错误码贴出来，可以判断是地址问题还是权限问题。",
+        ),
+    }
+}
+
+/// 写目标进程内存失败时的诊断表。
+///
+/// 写比读多一类失败：地址可读但不可写（代码段、只读数据）。这种情况系统给 487，
+/// 也可能给 5，两者都要指向「先改保护」而不是「重试一次」。
+pub fn for_write_memory(code: u32) -> Diagnosis {
+    match code {
+        0 => Diagnosis::new(
+            "这次连接只有读取权限，写不进去。",
+            "重新连接时用管理员身份启动 Zero；只读连接下冻结与补丁都不会生效。",
+        ),
+        5 => Diagnosis::new(
+            "拒绝访问：这块内存不允许写入。",
+            "代码段或只读数据需要先改保护；以管理员身份重启后再试。",
+        ),
+        6 => Diagnosis::new(
+            "进程句柄已经失效。",
+            "目标可能已经退出，重新选择进程。",
+        ),
+        87 => Diagnosis::new("进程已经退出。", "刷新进程列表后重新连接。"),
+        299 => Diagnosis::new(
+            "写不进去：这个地址不在目标进程的内存映射里。",
+            "地址列表里的旧条目多半已经失效；重新扫一次拿到新地址再写。",
+        ),
+        487 => Diagnosis::new(
+            "这个地址不可写（未提交、受保护，或只读）。",
+            "用「补丁」页写代码段（那里会自动改保护），或换一个数据地址。",
+        ),
+        998 => Diagnosis::new(
+            "地址无效或没有写入权限。",
+            "确认地址在当前进程里有效；补丁类写入请走补丁页。",
+        ),
+        other => Diagnosis::new(
+            format!("无法写入内存（系统错误 {other}）。"),
+            "把这条错误码贴出来。",
+        ),
+    }
+}
+
 /// 附加调试器失败时的诊断表。调试器失败码和打开进程不完全一样：
 /// 这里最常见的是「已被调试」（299）与「拒绝访问」（5）。
 pub fn for_debug_attach(code: u32) -> Diagnosis {
@@ -135,5 +211,20 @@ mod tests {
     #[test]
     fn debugger_wording_differs_from_picker() {
         assert_ne!(for_open_process(5).summary, for_debug_attach(5).summary);
+    }
+
+    #[test]
+    fn read_and_write_failures_say_different_things() {
+        // The same code must not be explained the same way: a failed read means
+        // "nothing is there", a failed write means "it is there but locked".
+        for code in [5u32, 299, 487, 998] {
+            let r = for_read_memory(code);
+            let w = for_write_memory(code);
+            assert!(!r.action.is_empty(), "read code {code} needs an action");
+            assert!(!w.action.is_empty(), "write code {code} needs an action");
+            assert_ne!(r.summary, w.summary, "code {code} must read differently for read and write");
+        }
+        assert!(for_write_memory(0).summary.contains("只有读取权限"));
+        assert!(for_read_memory(487).summary.contains("没有提交"));
     }
 }

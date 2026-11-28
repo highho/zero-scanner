@@ -790,8 +790,9 @@ fn call_tool(name: &str, args: &Json, engine: &Arc<Mutex<Engine>>) -> Result<Str
                 .unwrap_or(16)
                 .clamp(1, 4096) as usize;
             let mut buffer = vec![0u8; size];
-            if !handle.read(address, &mut buffer) {
-                return Err(format!("无法读取 {address:016X}"));
+            if let Err(code) = handle.read_code(address, &mut buffer) {
+                let diagnosis = crate::diag::for_read_memory(code);
+                return Err(format!("无法读取 {address:016X}：{}", diagnosis.line()));
             }
             let hex: Vec<String> = buffer.iter().map(|b| format!("{b:02X}")).collect();
             Ok(format!("{address:016X}: {}", hex.join(" ")))
@@ -1242,8 +1243,9 @@ fn call_tool(name: &str, args: &Json, engine: &Arc<Mutex<Engine>>) -> Result<Str
             // Read more than count*15 bytes so long instructions still fit.
             let window = (count * 15).clamp(64, 4096);
             let mut buffer = vec![0u8; window];
-            if !handle.read(address, &mut buffer) {
-                return Err(format!("无法读取 {address:016X}"));
+            if let Err(code) = handle.read_code(address, &mut buffer) {
+                let diagnosis = crate::diag::for_read_memory(code);
+                return Err(format!("无法读取 {address:016X}：{}", diagnosis.line()));
             }
             let insns = crate::disasm::disassemble(&buffer, address, handle.is_64bit, count);
             if insns.is_empty() {

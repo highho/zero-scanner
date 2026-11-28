@@ -1222,11 +1222,15 @@ impl ZeroApp {
             if !value_text.is_empty() {
                 if let Some(v) = self.manual_type.parse(&value_text) {
                     if let Some(bytes) = v.to_bytes(self.manual_type) {
-                        if handle.write(address, &bytes) {
-                            previous = current.clone();
-                            current = Some(v);
-                        } else {
-                            self.toast("写入失败：这个地址不可写。", ToastKind::Warn);
+                        match handle.write_code(address, &bytes) {
+                            Ok(()) => {
+                                previous = current.clone();
+                                current = Some(v);
+                            }
+                            Err(code) => {
+                                let diagnosis = crate::diag::for_write_memory(code);
+                                self.toast(diagnosis.line(), ToastKind::Warn);
+                            }
                         }
                     }
                 }
@@ -1675,8 +1679,9 @@ impl ZeroApp {
         }
         if let (Some(handle), Some(value)) = (&self.process, value) {
             if let Some(bytes) = value.to_bytes(edit.vtype) {
-                if !handle.write(address, &bytes) {
-                    self.toast("写入失败：地址不可写或进程权限不足。", ToastKind::Warn);
+                if let Err(code) = handle.write_code(address, &bytes) {
+                    let diagnosis = crate::diag::for_write_memory(code);
+                    self.toast(diagnosis.line(), ToastKind::Warn);
                 }
             }
         }
@@ -1722,18 +1727,21 @@ impl ZeroApp {
         };
         let base = address & !0xF;
         let mut buffer = vec![0u8; 256];
-        if handle.read(base, &mut buffer) {
-            self.mem_base = base;
-            self.mem_data = buffer;
-            self.mem_addr = format!("{:X}", base);
-            self.mem_error = None;
-            self.mem_loaded = true;
-        } else {
-            self.mem_base = base;
-            self.mem_data.clear();
-            self.mem_addr = format!("{:X}", base);
-            self.mem_error = Some("这个地址无法读取（可能未提交或受保护）。".to_string());
-            self.mem_loaded = false;
+        match handle.read_code(base, &mut buffer) {
+            Ok(()) => {
+                self.mem_base = base;
+                self.mem_data = buffer;
+                self.mem_addr = format!("{:X}", base);
+                self.mem_error = None;
+                self.mem_loaded = true;
+            }
+            Err(code) => {
+                self.mem_base = base;
+                self.mem_data.clear();
+                self.mem_addr = format!("{:X}", base);
+                self.mem_error = Some(crate::diag::for_read_memory(code).line());
+                self.mem_loaded = false;
+            }
         }
     }
 
@@ -1850,11 +1858,15 @@ impl ZeroApp {
                 }
             }
         }
-        if handle.write(addr, &bytes) {
-            self.toast(format!("已写入 {} 个字节。", bytes.len()), ToastKind::Success);
-            self.goto_memory(addr);
-        } else {
-            self.toast("写入失败：地址不可写或权限不足。", ToastKind::Error);
+        match handle.write_code(addr, &bytes) {
+            Ok(()) => {
+                self.toast(format!("已写入 {} 个字节。", bytes.len()), ToastKind::Success);
+                self.goto_memory(addr);
+            }
+            Err(code) => {
+                let diagnosis = crate::diag::for_write_memory(code);
+                self.toast(diagnosis.line(), ToastKind::Error);
+            }
         }
     }
 

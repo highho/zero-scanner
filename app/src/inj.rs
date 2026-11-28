@@ -118,8 +118,9 @@ pub fn read_original(handle: &ProcessHandle, address: u64, size: usize) -> Resul
         return Err("补丁长度不能为 0。".to_string());
     }
     let mut buffer = vec![0u8; size];
-    if !handle.read(address, &mut buffer) {
-        return Err(format!("无法读取 {address:X} 处的原始字节。"));
+    if let Err(code) = handle.read_code(address, &mut buffer) {
+        let diagnosis = crate::diag::for_read_memory(code);
+        return Err(format!("无法读取 {address:X} 处的原始字节：{}", diagnosis.line()));
     }
     Ok(buffer)
 }
@@ -139,10 +140,11 @@ pub fn apply(
     }
     let original = read_original(handle, address, bytes.len())?;
     let previous = handle.protect(address, bytes.len(), PAGE_EXECUTE_READWRITE)?;
-    let wrote = handle.write(address, bytes);
+    let wrote = handle.write_code(address, bytes);
     let restored = handle.protect(address, bytes.len(), previous).is_ok();
-    if !wrote {
-        return Err(format!("写入 {address:X} 失败（原字节未被修改）。"));
+    if let Err(code) = wrote {
+        let diagnosis = crate::diag::for_write_memory(code);
+        return Err(format!("写入 {address:X} 失败（原字节未被修改）：{}", diagnosis.line()));
     }
     Ok(Patch {
         address,
@@ -160,10 +162,11 @@ pub fn revert(handle: &ProcessHandle, patch: &mut Patch) -> Result<(), String> {
         return Err("这个补丁已经还原过了。".to_string());
     }
     let previous = handle.protect(patch.address, patch.original.len(), PAGE_EXECUTE_READWRITE)?;
-    let wrote = handle.write(patch.address, &patch.original);
+    let wrote = handle.write_code(patch.address, &patch.original);
     let _ = handle.protect(patch.address, patch.original.len(), previous);
-    if !wrote {
-        return Err(format!("无法还原 {:X} 处的原始字节。", patch.address));
+    if let Err(code) = wrote {
+        let diagnosis = crate::diag::for_write_memory(code);
+        return Err(format!("无法还原 {:X} 处的原始字节：{}", patch.address, diagnosis.line()));
     }
     patch.active = false;
     Ok(())
