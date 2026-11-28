@@ -1,0 +1,24 @@
+{
+  "name": "sample-game",
+  "description": "示例游戏配置：扫描参数与常用热键。",
+  "process": "sample-game.exe",
+  "scan": {
+    "value_type": "int32",
+    "alignment": 4,
+    "fast_scan": true
+  },
+  "hotkeys": [
+    {
+      "action": "toggle_freeze",
+      "key": "F1"
+    },
+    {
+      "action": "toggle_speed",
+      "key": "F2"
+    },
+    {
+      "action": "open_panel",
+      "key": "F3"
+    }
+  ]
+}

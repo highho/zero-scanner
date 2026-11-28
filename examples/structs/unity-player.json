@@ -1,0 +1,42 @@
+{
+  "name": "unity-player",
+  "description": "Unity 常见 Player 结构：血量、最大血量、坐标、朝向。",
+  "signature": "Player",
+  "fields": [
+    {
+      "name": "hp",
+      "offset": "0x00",
+      "type": "float"
+    },
+    {
+      "name": "max_hp",
+      "offset": "0x04",
+      "type": "float"
+    },
+    {
+      "name": "pos_x",
+      "offset": "0x08",
+      "type": "float"
+    },
+    {
+      "name": "pos_y",
+      "offset": "0x0C",
+      "type": "float"
+    },
+    {
+      "name": "pos_z",
+      "offset": "0x10",
+      "type": "float"
+    },
+    {
+      "name": "team",
+      "offset": "0x14",
+      "type": "int32"
+    },
+    {
+      "name": "alive",
+      "offset": "0x18",
+      "type": "bool"
+    }
+  ]
+}

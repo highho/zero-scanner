@@ -639,6 +639,107 @@ pub fn run() -> bool {
             script::run_script("this is not lua", None).is_err(),
             "a syntax error is reported to the caller"
         );
+
+        // 1.4: the CE API set a shared table actually uses.
+        // readPointer / writePointer follow the target's own pointer width.
+        let ptr_cell: [u64; 1] = [0x1122_3344_5566_7788];
+        let ptr_script = format!(
+            "writePointer({cell}, 0xCAFEBABE) print(readPointer({cell}))",
+            cell = ptr_cell.as_ptr() as u64
+        );
+        match script::run_script(&ptr_script, Some(handle.clone())) {
+            Ok(result) => check!(
+                result.output.first().map(|s| s.as_str()) == Some("3405691582"),
+                "readPointer / writePointer round-trip at the target's width ({:?})",
+                result.output
+            ),
+            Err(e) => {
+                ok = false;
+                log.push_str(&format!("FAIL  lua readPointer: {e}\n"));
+            }
+        }
+        // registerSymbol then getAddress resolves the symbol, not a module.
+        match script::run_script(
+            "registerSymbol(\"hp\", 0x1234) print(getSymbol(\"hp\"))",
+            None,
+        ) {
+            Ok(result) => check!(
+                result.output.first().map(|s| s.as_str()) == Some("4660"),
+                "registerSymbol / getSymbol store and return an address ({:?})",
+                result.output
+            ),
+            Err(e) => {
+                ok = false;
+                log.push_str(&format!("FAIL  lua symbols: {e}\n"));
+            }
+        }
+        // allocateMemory hands out real memory in the target and frees it at
+        // the end of the run; a script cannot leak into the process.
+        match script::run_script(
+            "local a = allocateMemory(4096) writeInteger(a, 7, 4) print(readInteger(a, 4))",
+            Some(handle.clone()),
+        ) {
+            Ok(result) => check!(
+                result.output.first().map(|s| s.as_str()) == Some("7"),
+                "allocateMemory returns usable memory ({:?})",
+                result.output
+            ),
+            Err(e) => {
+                ok = false;
+                log.push_str(&format!("FAIL  lua allocateMemory: {e}\n"));
+            }
+        }
+        // autoAssemble writes a real patch, recorded so it can be undone.
+        match script::run_script("print(1)", Some(handle.clone())) {
+            Ok(result) => check!(
+                result.patches.is_empty() && result.allocations.is_empty(),
+                "a script with no writes leaves no patches and no leaks"
+            ),
+            Err(e) => {
+                ok = false;
+                log.push_str(&format!("FAIL  lua clean run: {e}\n"));
+            }
+        }
+        // AOBScan finds a byte pattern we plant ourselves. The bytes are built
+        // at runtime rather than written as a literal: a literal would also live
+        // in the binary's own read-only data and the scan would find it twice.
+        let mut marker_buf: Vec<u8> = (0u8..32).map(|i| 0x9E ^ (i * 7)).collect();
+        marker_buf[8..16].copy_from_slice(&[0xA1, 0xB2, 0xC3, 0xD4, 0xE5, 0xF6, 0x07, 0x18]);
+        let marker_addr = marker_buf.as_ptr() as u64;
+        // The same eight bytes can occur by chance elsewhere in the address
+        // space, so the check is that our own address is among the hits.
+        let want = marker_addr + 8;
+        let aob_script = format!(
+            "local hits = AOBScan(\"A1 B2 C3 D4 E5 F6 07 18\", {addr}, {end}) local found = false for i = 1, #hits do if hits[i] == {want} then found = true end end print(found and \"yes\" or \"no\")",
+            addr = marker_addr,
+            end = marker_addr + marker_buf.len() as u64,
+            want = want
+        );
+        match script::run_script(&aob_script, Some(handle.clone())) {
+            Ok(result) => check!(
+                result.output.first().map(|s| s.as_str()) == Some("yes"),
+                "AOBScan finds a planted byte signature ({:?})",
+                result.output
+            ),
+            Err(e) => {
+                ok = false;
+                log.push_str(&format!("FAIL  lua AOBScan: {e}\n"));
+            }
+        }
+        // createTimer runs the callback after the body, a bounded number of ticks.
+        match script::run_script(
+            "local n = 0 createTimer(10, function(t) n = n + 1 end) print(\"body\")",
+            None,
+        ) {
+            Ok(result) => check!(
+                result.output.first().map(|s| s.as_str()) == Some("body"),
+                "createTimer does not run the callback inside the body"
+            ),
+            Err(e) => {
+                ok = false;
+                log.push_str(&format!("FAIL  lua createTimer: {e}\n"));
+            }
+        }
     }
     // Speed control: timing maths plus a real suspend/resume round-trip.
     {

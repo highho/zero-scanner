@@ -217,6 +217,12 @@ fn scan_chunk(
             return false;
         };
         let candidate = anchor_pos - anchor_index;
+        // The anchor byte can sit near the end of the region, where a full
+        // pattern no longer fits. Every later candidate is even closer to the
+        // end, so stop instead of reading past the buffer.
+        if candidate + plen > valid {
+            return false;
+        }
         let mut matched = true;
         for k in 0..plen {
             if pattern.mask[k] && buf[candidate + k] != pattern.bytes[k] {

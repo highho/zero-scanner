@@ -878,10 +878,19 @@ fn call_tool(name: &str, args: &Json, engine: &Arc<Mutex<Engine>>) -> Result<Str
                 .ok_or_else(|| "需要 source".to_string())?;
             let handle = engine_handle(engine)?;
             let result = crate::lua::run_script(source, Some(handle))?;
+            let patched = result.patches.len();
+            if patched > 0 {
+                if let Ok(mut guard) = engine.lock() {
+                    guard.patches.extend(result.patches);
+                }
+            }
             let mut text = String::new();
             for line in &result.output {
                 text.push_str(line);
                 text.push('\n');
+            }
+            if patched > 0 {
+                text.push_str(&format!("（脚本留下 {patched} 个补丁，可用 zero_undo 撤销）\n"));
             }
             if let Some(value) = &result.returned {
                 text.push_str(&format!("=> {value}\n"));

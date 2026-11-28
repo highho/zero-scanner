@@ -177,6 +177,61 @@ fn main() -> eframe::Result<()> {
             }
         }
     }
+    if let Some(pos) = args.iter().position(|a| a == "--run-script") {
+        // Headless script run: the same Lua engine the GUI uses, so a table
+        // author can check a script from a terminal or CI before loading it.
+        let path = match args.get(pos + 1) {
+            Some(value) => PathBuf::from(value),
+            None => {
+                eprintln!("--run-script 需要一个脚本路径");
+                std::process::exit(2);
+            }
+        };
+        let pid = args
+            .iter()
+            .position(|a| a == "--pid")
+            .and_then(|at| args.get(at + 1))
+            .and_then(|value| value.parse::<u32>().ok());
+        let source = match std::fs::read_to_string(&path) {
+            Ok(text) => text,
+            Err(e) => {
+                eprintln!("读不了 {}：{e}", path.display());
+                std::process::exit(1);
+            }
+        };
+        let handle = match pid {
+            Some(pid) => match winmem::open_process(pid, &path.display().to_string()) {
+                Ok(handle) => Some(handle),
+                Err(e) => {
+                    eprintln!("无法打开进程 {pid}：{e}");
+                    std::process::exit(1);
+                }
+            },
+            None => None,
+        };
+        match lua::run_script(&source, handle) {
+            Ok(result) => {
+                for line in &result.output {
+                    println!("{line}");
+                }
+                if let Some(value) = &result.returned {
+                    println!("=> {value}");
+                }
+                let patched = result.patches.len();
+                if patched > 0 {
+                    println!("（脚本留下 {patched} 个补丁）");
+                }
+                for address in &result.allocations {
+                    println!("（{address:016X} 的内存未能释放）");
+                }
+                std::process::exit(0);
+            }
+            Err(e) => {
+                eprintln!("{e}");
+                std::process::exit(1);
+            }
+        }
+    }
     if args.iter().any(|a| a == "--selftest") {
         let ok = selftest::run();
         std::process::exit(if ok { 0 } else { 1 });

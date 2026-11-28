@@ -2425,12 +2425,31 @@ impl ZeroApp {
                 let lines = result.output.len();
                 self.script_error = None;
                 self.script_output = result.output;
+                // Writes a script made join the normal patch list, so they can
+                // be undone one at a time or all at once like any other edit.
+                let patched = result.patches.len();
+                let leaked = result.allocations.len();
+                if patched > 0 {
+                    self.inj_patches.extend(result.patches);
+                    self.save_workspace();
+                }
+                let mut note = String::new();
+                if patched > 0 {
+                    note.push_str(&format!("，{patched} 个补丁可在补丁页撤销"));
+                }
+                if leaked > 0 {
+                    note.push_str(&format!("，{} 块内存未能释放", leaked));
+                }
                 self.toast(
                     format!(
-                        "脚本执行完成：{lines} 行输出，{:.1} ms",
+                        "脚本执行完成：{lines} 行输出，{:.1} ms{note}",
                         started.elapsed().as_secs_f64() * 1000.0
                     ),
-                    ToastKind::Success,
+                    if leaked > 0 {
+                        ToastKind::Warn
+                    } else {
+                        ToastKind::Success
+                    },
                 );
             }
             Err(e) => {
