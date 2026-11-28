@@ -302,11 +302,15 @@ fn main() -> eframe::Result<()> {
         .unwrap_or(0.0);
     let initial_tab = parse_tab(&args);
     let boot_theme = parse_theme(&args);
+    let force_guide = args.iter().any(|a| a == "--guide");
     eframe::run_native(
         "Zero",
         options,
         Box::new(move |cc| {
             let mut app = ZeroApp::new(cc, path.clone(), initial_tab, demo);
+            if force_guide {
+                app.show_guide = true;
+            }
             app.settings_scroll = settings_scroll;
             app.show_hotkeys = show_hotkeys;
             app.show_settings = show_settings;

@@ -25,6 +25,10 @@ pub struct Prefs {
     /// prefs.json that predates this field keeps the original behaviour.
     #[serde(default = "yes")]
     pub auto_update: bool,
+    /// Whether the first-run guide has been finished or dismissed. Defaults to
+    /// off, so a fresh install sees the guide once and never again after that.
+    #[serde(default)]
+    pub guide_done: bool,
 }
 
 impl Default for Prefs {
@@ -33,6 +37,7 @@ impl Default for Prefs {
             theme: String::new(),
             skipped_version: String::new(),
             auto_update: true,
+            guide_done: false,
         }
     }
 }
@@ -100,6 +105,13 @@ pub fn set_auto_update(enabled: bool) {
     prefs.auto_update = enabled;
     persist(&prefs);
 }
+/// Remember that the first-run guide has been seen. Written once, on finish
+/// or dismiss, so the guide never comes back on its own.
+pub fn set_guide_done(done: bool) {
+    let mut prefs = load();
+    prefs.guide_done = done;
+    persist(&prefs);
+}
 
 #[cfg(test)]
 mod tests {
@@ -111,6 +123,20 @@ mod tests {
         assert_eq!(old.theme, "neon");
         assert!(old.auto_update, "缺失字段必须默认为开启");
         assert!(old.skipped_version.is_empty());
+        assert!(!old.guide_done, "老设置里没有向导字段，应当当作没看过");
+    }
+
+    #[test]
+    fn guide_done_survives_round_trip() {
+        let text = serde_json::to_string(&Prefs {
+            theme: String::new(),
+            skipped_version: String::new(),
+            auto_update: true,
+            guide_done: true,
+        })
+        .unwrap();
+        let back: Prefs = serde_json::from_str(&text).unwrap();
+        assert!(back.guide_done);
     }
 
     #[test]
@@ -119,6 +145,7 @@ mod tests {
             theme: "ice".into(),
             skipped_version: "1.3.0".into(),
             auto_update: false,
+            guide_done: true,
         })
         .unwrap();
         let back: Prefs = serde_json::from_str(&text).unwrap();

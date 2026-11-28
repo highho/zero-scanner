@@ -4839,6 +4839,9 @@ impl ZeroApp {
         if self.show_settings {
             self.settings_modal(ctx);
         }
+        if self.show_guide {
+            self.guide_modal(ctx);
+        }
         if self.show_add {
             self.add_modal(ctx);
         }
@@ -5212,6 +5215,197 @@ impl ZeroApp {
         }
     }
 
+    /// The first-run guide: one overlay that walks a new user through the
+    /// shortest real path from "I installed this" to "I changed a value".
+    /// Every step runs the app's real code; nothing here is a mock-up.
+    fn guide_modal(&mut self, ctx: &egui::Context) {
+        let mut close = false;
+        let mut next = false;
+        let mut back = false;
+        let mut scan = false;
+        let mut pick = false;
+        let step = self.guide_step.min(3);
+        let attached = self.is_attached();
+        let candidates = self.hits.len();
+        egui::Window::new("guide")
+            .id(egui::Id::new("zero_guide"))
+            .title_bar(false)
+            .collapsible(false)
+            .resizable(false)
+            .anchor(Align2::CENTER_CENTER, Vec2::ZERO)
+            .fixed_size(Vec2::new(620.0, 460.0))
+            .frame(
+                Frame::none()
+                    .fill(theme::panel())
+                    .stroke(Stroke::new(1.0, theme::border()))
+                    .rounding(Rounding::same(16.0))
+                    .inner_margin(Margin::same(22.0))
+                    .shadow(egui::epaint::Shadow {
+                        offset: Vec2::new(0.0, 20.0),
+                        blur: 60.0,
+                        spread: 0.0,
+                        color: Color32::from_black_alpha(150),
+                    }),
+            )
+            .show(ctx, |ui| {
+                ui.horizontal(|ui| {
+                    ui.vertical(|ui| {
+                        ui.label(egui::RichText::new("第一次用 Zero").size(20.0).strong());
+                        ui.label(
+                            egui::RichText::new(format!("第 {} / 4 步", step + 1))
+                                .size(11.5)
+                                .color(theme::muted()),
+                        );
+                    });
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        if theme::icon_button(ui, IconKind::Close).clicked() {
+                            close = true;
+                        }
+                    });
+                });
+                ui.add_space(12.0);
+
+                match step {
+                    0 => {
+                        theme::section_label(ui, "选一个进程");
+                        ui.add_space(6.0);
+                        ui.label(
+                            egui::RichText::new(
+                                "Zero 只能改别的程序的内存，所以第一件事是连上一个目标。游戏、模拟器，或者内置的练习靶场都可以。",
+                            )
+                            .size(12.0)
+                            .color(theme::muted()),
+                        );
+                        ui.add_space(10.0);
+                        ui.horizontal(|ui| {
+                            if theme::gradient_button(ui, "选择进程", 140.0, true).clicked() {
+                                pick = true;
+                            }
+                            if attached {
+                                theme::tag(
+                                    ui,
+                                    &format!("已连接 {}", self.process_name),
+                                    theme::success(),
+                                );
+                            } else {
+                                theme::tag(ui, "还没连接", theme::faint());
+                            }
+                        });
+                    }
+                    1 => {
+                        theme::section_label(ui, "输入你在游戏里看到的数值");
+                        ui.add_space(6.0);
+                        ui.label(
+                            egui::RichText::new(
+                                "找金币就填金币数，找血量就填血量。Zero 会把整个进程里等于这个数的位置都列出来。",
+                            )
+                            .size(12.0)
+                            .color(theme::muted()),
+                        );
+                        ui.add_space(10.0);
+                        ui.add(
+                            egui::TextEdit::singleline(&mut self.guide_value)
+                                .hint_text("例如 9800")
+                                .font(FontId::monospace(14.0))
+                                .desired_width(240.0),
+                        );
+                    }
+                    2 => {
+                        theme::section_label(ui, "开始扫描");
+                        ui.add_space(6.0);
+                        ui.label(
+                            egui::RichText::new(
+                                "扫描是只读的：只找位置，不改任何东西。扫完你会拿到一串候选地址。",
+                            )
+                            .size(12.0)
+                            .color(theme::muted()),
+                        );
+                        ui.add_space(10.0);
+                        ui.horizontal(|ui| {
+                            if theme::gradient_button(ui, "扫描", 120.0, attached).clicked() && attached {
+                                scan = true;
+                            }
+                            ui.label(
+                                egui::RichText::new(format!("数值 {}", self.guide_value.trim()))
+                                    .size(11.0)
+                                    .color(theme::faint()),
+                            );
+                        });
+                    }
+                    _ => {
+                        theme::section_label(ui, "改一下，再搜一次");
+                        ui.add_space(6.0);
+                        ui.label(
+                            egui::RichText::new(format!(
+                                "现在有 {candidates} 个候选。回到游戏里让这个数值变一下，再回来用「再次扫描」输入新数值，剩下的就是它。",
+                            ))
+                            .size(12.0)
+                            .color(theme::muted()),
+                        );
+                        ui.add_space(10.0);
+                        ui.horizontal(|ui| {
+                            if theme::gradient_button(ui, "去地址列表", 140.0, candidates > 0).clicked()
+                                && candidates > 0
+                            {
+                                self.tab = Tab::List;
+                                next = true;
+                            }
+                            theme::tag(ui, &format!("{candidates} 个候选"), theme::accent_2());
+                        });
+                    }
+                }
+
+                if let Some(error) = &self.guide_error {
+                    ui.add_space(8.0);
+                    ui.label(egui::RichText::new(error).size(11.0).color(theme::danger()));
+                }
+
+                ui.with_layout(Layout::bottom_up(Align::LEFT), |ui| {
+                    ui.horizontal(|ui| {
+                        if theme::outline_button(ui, "跳过向导", true).clicked() {
+                            close = true;
+                        }
+                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                            let last = step >= 3;
+                            if theme::gradient_button(
+                                ui,
+                                if last { "完成" } else { "下一步" },
+                                110.0,
+                                true,
+                            )
+                            .clicked()
+                            {
+                                if last {
+                                    close = true;
+                                } else {
+                                    next = true;
+                                }
+                            }
+                            if step > 0 && theme::outline_button(ui, "上一步", true).clicked() {
+                                back = true;
+                            }
+                        });
+                    });
+                });
+            });
+        if pick {
+            self.open_picker();
+        }
+        if scan {
+            self.guide_scan();
+        }
+        if next {
+            self.guide_step = (step + 1).min(3);
+            self.guide_error = None;
+        }
+        if back {
+            self.guide_step = step.saturating_sub(1);
+            self.guide_error = None;
+        }
+        if close {
+            self.dismiss_guide();
+        }
+    }
     fn settings_modal(&mut self, ctx: &egui::Context) {
         let mut close = false;
         let mut admin = false;

@@ -275,6 +275,12 @@ pub struct ZeroApp {
     pub smart_msgs: Vec<SmartMsg>,
 
     pub show_settings: bool,
+    /// First-run guide. Shown once on a fresh install; the four steps are
+    /// tracked by guide_step so the same overlay walks the whole first scan.
+    pub show_guide: bool,
+    pub guide_step: usize,
+    pub guide_value: String,
+    pub guide_error: Option<String>,
     /// 设置弹窗内容区初始滚动偏移（只给界面回归截图用，默认 0）。
     pub settings_scroll: f32,
     pub update: Updater,
@@ -413,6 +419,10 @@ impl ZeroApp {
                 text: "你好，我是 Zero 的本地智能助手。告诉我你在游戏里看到的数值，例如「我的金币是 9800」，我会帮你选好扫描类型。".to_string(),
             }],
             show_settings: false,
+            show_guide: false,
+            guide_step: 0,
+            guide_value: String::new(),
+            guide_error: None,
             update: Updater::default(),
             toasts: Vec::new(),
             struct_addr: String::new(),
@@ -693,6 +703,11 @@ impl ZeroApp {
             });
             app.toasts.clear();
         }
+        // First run: walk the user through one real scan. Skipped in demo and
+        // screenshot runs, which need a predictable screen.
+        if !demo && app.screenshot.is_none() && !crate::prefs::load().guide_done {
+            app.show_guide = true;
+        }
         // Demo data is synthetic: restoring a saved workspace on top of it would
         // duplicate every entry and confuse the screenshots.
         let restored_patches = if demo { 0 } else { app.restore_workspace() };
@@ -718,6 +733,39 @@ impl ZeroApp {
         app
     }
 
+    /// Close the first-run guide for good. Written to prefs so it stays closed.
+    pub fn dismiss_guide(&mut self) {
+        self.show_guide = false;
+        self.guide_step = 0;
+        self.guide_error = None;
+        crate::prefs::set_guide_done(true);
+    }
+
+    /// Step 3 of the guide: run the same first scan the scan page would run,
+    /// with the value typed into the guide. Reuses the real path on purpose —
+    /// a guide that runs its own private scan would teach the wrong thing.
+    pub fn guide_scan(&mut self) {
+        let value = self.guide_value.trim().to_string();
+        if value.is_empty() {
+            self.guide_error = Some("先输入你在游戏里看到的数值。".to_string());
+            return;
+        }
+        if self.process.is_none() {
+            self.guide_error = Some("先在第 1 步连接一个进程。".to_string());
+            return;
+        }
+        self.scan_value = value;
+        self.scan_type = ScanType::Exact;
+        self.guide_error = None;
+        self.start_first_scan();
+        // start_first_scan reports synchronous failures through scan_error;
+        // a started scan moves to Running, which is what step 3 waits on.
+        if self.scan_phase == ScanPhase::Running {
+            self.guide_step = 3;
+        } else {
+            self.guide_error = self.scan_error.clone();
+        }
+    }
     pub fn is_attached(&self) -> bool {
         self.process.is_some()
     }

@@ -1674,12 +1674,17 @@ pub fn run() -> bool {
             theme: "ice".to_string(),
             skipped_version: "1.3.0".to_string(),
             auto_update: false,
+            guide_done: true,
         };
         let text = serde_json::to_string(&full).unwrap();
         let back: Prefs = serde_json::from_str(&text).unwrap();
         check!(
             back.skipped_version == "1.3.0" && !back.auto_update,
             "prefs: 跳过版本与自动检查开关能完整往返"
+        );
+        check!(
+            back.guide_done,
+            "prefs: 首启向导标记能完整往返"
         );
     }
 
