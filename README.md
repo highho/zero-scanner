@@ -13,8 +13,9 @@
 [![egui](https://img.shields.io/badge/egui-0.27-1f4257?style=flat-square)](#架构)
 [![Single file](https://img.shields.io/badge/单文件-6.4%20MB-2ea44f?style=flat-square)](#下载)
 [![Offline](https://img.shields.io/badge/推理-本机-brightgreen?style=flat-square)](#智能化闭环)
+[![License](https://img.shields.io/badge/license-MIT-2ea44f?style=flat-square)](LICENSE)
 
-[下载](#下载) · [快速上手](#快速上手) · [功能](#功能) · [MCP 服务](#给-ai-用mcp-服务) · [架构](#架构) · [构建](#从源码构建) · [安全原则](#安全原则)
+[下载](#下载) · [界面](#界面) · [快速上手](#快速上手) · [功能](#功能) · [MCP 服务](#给-ai-用mcp-服务) · [架构](#架构) · [构建](#从源码构建) · [安全原则](#安全原则) · [许可证](#许可证)
 
 </div>
 
@@ -25,7 +26,7 @@
 | 文件 | 说明 |
 | --- | --- |
 | [`zero-scanner.exe`](https://github.com/highho/zero-scanner/releases/latest) | 便携版，单文件，双击即用 |
-| [`zero-scanner-v1.0.0-windows.zip`](https://github.com/highho/zero-scanner/releases/latest) | 同一份 exe + 随包说明 |
+| [`zero-scanner-v1.0.0-windows.zip`](https://github.com/highho/zero-scanner/releases/latest) | 同一份 exe + 说明文档与界面截图 |
 
 - **免安装、无外部运行时**：Lua 5.4 通过 `mlua` 的 vendored feature 静态编进二进制，不需要另装 Lua，也不用装任何运行库。
 - **只支持 Windows 10 / 11 x64**。
@@ -42,6 +43,22 @@
 ```
 
 第一次用建议先开练习靶场：它自带已知的内存布局（金币、血量、指针链、AOB 标记），可以放心改坏。
+
+## 界面
+
+三张图都是 `--demo` 模式下的真实渲染，进程是内置练习靶场，不是摆拍。
+
+**扫描**——左边是工作区，右边是智能建议：候选越少，它越想帮你收口。
+
+![扫描页](docs/scan.png)
+
+**地址列表**——把值得留的地址钉住，锁定的地址每 60ms 写回一次，写入都可撤销。
+
+![地址列表](docs/list.png)
+
+**内存浏览**——十六进制直读目标进程，看到的每个字节都是真的。
+
+![内存浏览](docs/memory.png)
 
 ## 功能
 
@@ -295,4 +312,8 @@ zero-scanner.exe --e2e <pid> e2e_target.info
 Zero 是纯自研实现，不包含、也不移植 Cheat Engine 的源码；界面与交互按现代桌面工具的审美重做，快捷键与术语尽量照顾 CE 老用户的手感。
 
 > 仅供学习、研究与调试你自己拥有或获授权调试的程序。把它用在联机游戏或别人的机器上，后果自负。
+
+## 许可证
+
+MIT，见 [LICENSE](LICENSE)。你可以自由使用、修改、再分发，保留版权声明即可。
 
