@@ -112,8 +112,10 @@ Zero 1.2 把界面颜色从编译期常量换成了**运行时主题引擎**：
 自检命令（不打开界面，直接打印结论）：
 
 \`\`\`bash
-zero-scanner.exe --update-check              # current=1.1.0 latest=已是最新
-zero-scanner.exe --update-download <目录>     # 真的走一遍下载，把文件放到指定目录
+zero-scanner.exe --update-check                # 查最新发布，打印结论
+zero-scanner.exe --update-download <目录>       # 真的走一遍下载，把文件放到指定目录
+zero-scanner.exe --update-download-any <目录>   # 忽略版本比较强制下载（验证下载链路用）
+zero-scanner.exe --update-apply-from <文件>     # 走一遍替换并重启（验证更新脚本用）
 \`\`\`
 
 ## 功能
@@ -246,12 +248,14 @@ MCP listening on http://127.0.0.1:3780/mcp?token=9f2c1d...（32 位随机串）
 | --- | --- |
 | `zero-scanner.exe` | 图形界面 |
 | `zero-scanner.exe --mcp <port>` | 无界面启动 MCP 服务（不写端口默认 3777） |
-| `zero-scanner.exe --selftest` | 跑 119 项自检，结论写 `selftest.log`，退出码即结果 |
+| `zero-scanner.exe --selftest` | 跑 126 项自检，结论写 `selftest.log`，退出码即结果 |
 | `zero-scanner.exe --verify <pid>` | 对目标进程做 8 项可用性验证 |
 | `zero-scanner.exe --e2e <pid> [info]` | 23 项端到端验证（配合 `e2e_target.py`） |
 | `zero-scanner.exe --screenshot <png> --tab <名字>` | 渲染某个页面为 PNG（界面回归用，加 `--settings` 连设置弹窗一起） |
 | `zero-scanner.exe --update-check` | 查最新发布并打印结论，不打开界面 |
 | `zero-scanner.exe --update-download <目录>` | 走一遍真实下载，落到指定目录（校验用） |
+| `zero-scanner.exe --update-download-any <目录>` | 忽略版本比较强制下载，用于验证下载链路 |
+| `zero-scanner.exe --update-apply-from <文件>` | 走一遍「等退出→替换 exe→重启」的批处理 |
 | `zero-scanner.exe --hotkeys` | 启动时展开快捷键速查 |
 | `zero-scanner.exe --settings` | 启动时展开设置 |
 | `zero-scanner.exe --practice-target` | 只跑内置靶场进程 |
