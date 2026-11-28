@@ -203,6 +203,12 @@ fn main() -> eframe::Result<()> {
     let demo = args.iter().any(|a| a == "--demo");
     let show_hotkeys = args.iter().any(|a| a == "--hotkeys");
     let show_settings = args.iter().any(|a| a == "--settings");
+    let settings_scroll = args
+        .iter()
+        .position(|a| a == "--settings-scroll")
+        .and_then(|i| args.get(i + 1))
+        .and_then(|v| v.parse::<f32>().ok())
+        .unwrap_or(0.0);
     let initial_tab = parse_tab(&args);
     let boot_theme = parse_theme(&args);
     eframe::run_native(
@@ -210,6 +216,7 @@ fn main() -> eframe::Result<()> {
         options,
         Box::new(move |cc| {
             let mut app = ZeroApp::new(cc, path.clone(), initial_tab, demo);
+            app.settings_scroll = settings_scroll;
             app.show_hotkeys = show_hotkeys;
             app.show_settings = show_settings;
             if let Some(theme_id) = &boot_theme {

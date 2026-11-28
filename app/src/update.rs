@@ -62,18 +62,48 @@ pub struct Updater {
 
 impl Default for Updater {
     fn default() -> Self {
-        Self {
-            state: State::Idle,
-            auto: true,
-            last_check: None,
-            skipped: None,
-            rx: None,
-            manual_check: false,
-        }
+        Self::from_prefs()
     }
 }
 
 impl Updater {
+    /// 从磁盘偏好恢复「自动检查」开关和「已跳过版本」。
+    ///
+    /// 这两项以前只活在内存里：跳过某个版本后一重启就忘，于是每次启动都再
+    /// 提示一遍；「自动检查已关闭」的分支也永远走不到，因为没有任何入口能
+    /// 把它关掉。
+    pub fn from_prefs() -> Self {
+        let prefs = crate::prefs::load();
+        Self {
+            state: State::Idle,
+            auto: prefs.auto_update,
+            last_check: None,
+            skipped: if prefs.skipped_version.is_empty() {
+                None
+            } else {
+                Some(prefs.skipped_version)
+            },
+            rx: None,
+            manual_check: false,
+        }
+    }
+
+    /// 记住跳过的版本并落盘，重启后不再提示同一个版本。
+    pub fn skip_version(&mut self, version: &str) {
+        self.skipped = Some(version.to_string());
+        crate::prefs::set_skipped_version(version);
+    }
+
+    /// 切换自动检查并落盘。
+    pub fn set_auto(&mut self, enabled: bool) {
+        self.auto = enabled;
+        crate::prefs::set_auto_update(enabled);
+        if enabled {
+            // 刚打开就该尽快生效，不必等到下一个 6 小时窗口。
+            self.last_check = None;
+        }
+    }
+
     pub fn busy(&self) -> bool {
         matches!(self.state, State::Checking | State::Downloading(_))
     }
@@ -351,6 +381,34 @@ fn download_release(release: &Release, tx: Sender<Msg>) -> Result<PathBuf, Strin
 
 // ---------------------------------------------------------------- 安装并重启
 
+/// 确认待安装的文件还在、且看起来是个完整的 exe。
+///
+/// 下载完成后到用户点「重启并安装」之间可能隔了很久，期间文件可能被清理工具
+/// 删掉、被下载器改成半截。这一步必须在拉起批处理之前做：批处理一旦跑起来，
+/// 失败只会写进 apply.log，用户界面里看不到任何提示。
+pub fn validate_exe(path: &Path) -> Result<(), String> {
+    let meta =
+        std::fs::metadata(path).map_err(|e| format!("下载的更新文件不见了：{e}（请重新下载）"))?;
+    if !meta.is_file() {
+        return Err("下载的更新文件不是一个普通文件".to_string());
+    }
+    if meta.len() < 1024 {
+        return Err(format!("下载的更新文件只有 {} 字节，明显不完整", meta.len()));
+    }
+    let mut head = [0u8; 2];
+    {
+        use std::io::Read;
+        let mut f =
+            std::fs::File::open(path).map_err(|e| format!("无法打开下载的更新文件：{e}"))?;
+        f.read_exact(&mut head)
+            .map_err(|e| format!("无法读取下载的更新文件：{e}"))?;
+    }
+    if &head != b"MZ" {
+        return Err("下载的更新文件不是有效的 exe（缺少 MZ 头）".to_string());
+    }
+    Ok(())
+}
+
 /// 用批处理等本进程退出后再替换 exe，然后重新启动。
 /// 调用方在成功后应立即退出，把文件句柄交出去。
 pub fn install_and_restart(new_exe: &Path) -> Result<(), String> {
@@ -358,6 +416,10 @@ pub fn install_and_restart(new_exe: &Path) -> Result<(), String> {
     if current == new_exe {
         return Err("下载文件与当前程序是同一个路径".to_string());
     }
+    // 安装前再确认一次文件还在、而且还是个完整的 exe。State::Ready 里的路径
+    // 可能已经在内存里放了很久，期间文件被清理工具删掉或下了一半，只有到这
+    // 一步才会发现——那时批处理已经跑起来了，报错只会留在日志里，用户看不到。
+    validate_exe(new_exe)?;
     let pid = std::process::id();
     // 批处理是被 cmd /C 后台拉起的，它的工作目录不是调用者的目录。
     // 只要有一个相对路径，move 就会找不到文件，而 >nul 会把错误吞掉，

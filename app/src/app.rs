@@ -235,6 +235,8 @@ pub struct ZeroApp {
     pub smart_msgs: Vec<SmartMsg>,
 
     pub show_settings: bool,
+    /// 设置弹窗内容区初始滚动偏移（只给界面回归截图用，默认 0）。
+    pub settings_scroll: f32,
     pub update: Updater,
     pub toasts: Vec<Toast>,
     pub struct_addr: String,
@@ -368,6 +370,7 @@ impl ZeroApp {
             struct_result: None,
             struct_error: None,
             struct_loaded: false,
+            settings_scroll: 0.0,
             screenshot: screenshot.map(|path| ScreenshotJob {
                 path,
                 frames: 0,

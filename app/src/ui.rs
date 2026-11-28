@@ -3775,6 +3775,7 @@ impl ZeroApp {
         let mut install_now = false;
         let mut skip_version: Option<String> = None;
         let mut open_releases = false;
+        let mut auto_changed: Option<bool> = None;
 
         theme::card_frame().show(ui, |ui| {
             ui.set_width(ui.available_width());
@@ -3897,24 +3898,40 @@ impl ZeroApp {
                     }
                 });
             });
-            ui.add_space(4.0);
-            ui.label(
-                egui::RichText::new(if self.update.auto {
-                    "启动后会自动检查，最多每 6 小时一次。"
-                } else {
-                    "自动检查已关闭。"
-                })
-                .size(10.0)
-                .color(theme::faint()),
-            );
+            ui.add_space(6.0);
+            ui.horizontal(|ui| {
+                let mut auto = self.update.auto;
+                if ui
+                    .checkbox(&mut auto, "启动后自动检查更新")
+                    .on_hover_text("最多每 6 小时一次；关闭后只能手动点「检查更新」")
+                    .changed()
+                {
+                    auto_changed = Some(auto);
+                }
+                ui.label(
+                    egui::RichText::new(if auto {
+                        "最多每 6 小时一次。"
+                    } else {
+                        "自动检查已关闭。"
+                    })
+                    .size(10.0)
+                    .color(theme::faint()),
+                );
+            });
         });
 
+        if let Some(enabled) = auto_changed {
+            self.update.set_auto(enabled);
+        }
         if check_now {
             self.update.check(true);
         }
         if let Some(version) = skip_version {
-            self.update.skipped = Some(version.clone());
-            self.toast(format!("已跳过 v{version}，下次有更新再提醒"), ToastKind::Info);
+            self.update.skip_version(&version);
+            self.toast(
+                format!("已跳过 v{version}，重启后也不会再提示"),
+                ToastKind::Info,
+            );
         }
         if download_now {
             if let State::Available(release) = &self.update.state {
@@ -4524,11 +4541,16 @@ impl ZeroApp {
                 });
                 ui.add_space(10.0);
                 let body_h = (ui.available_height() - 46.0).max(200.0);
-                egui::ScrollArea::vertical()
+                let mut body = egui::ScrollArea::vertical()
                     .id_source("zero_settings_body")
                     .max_height(body_h)
-                    .auto_shrink([false, false])
-                    .show(ui, |ui| {
+                    .auto_shrink([false, false]);
+                // 只在截图回归时固定滚动位置：平时不设置这个偏移，否则每帧
+                // 都会被拽回顶部，用户自己滚不动。
+                if self.screenshot.is_some() {
+                    body = body.vertical_scroll_offset(self.settings_scroll);
+                }
+                body.show(ui, |ui| {
                 theme::soft_card().show(ui, |ui| {
                     ui.checkbox(&mut self.fast, "快速扫描（按 4 字节对齐，速度更快）");
                     ui.checkbox(&mut self.writable_only, "只扫描可写内存（减少无关结果）");

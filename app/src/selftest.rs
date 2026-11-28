@@ -1056,6 +1056,93 @@ pub fn run() -> bool {
             "update: tag normalization strips the v prefix"
         );
     }
+
+    // 更新安装前的文件校验：不存在 / 太小 / 不是 exe 都必须拒绝。
+    {
+        use crate::update;
+        let dir = std::env::temp_dir().join("zero-selftest-validate");
+        std::fs::create_dir_all(&dir).ok();
+        let missing = dir.join("nope.exe");
+        std::fs::remove_file(&missing).ok();
+        check!(
+            update::validate_exe(&missing).is_err(),
+            "update: 缺失的安装文件会被拒绝"
+        );
+
+        let tiny = dir.join("tiny.exe");
+        std::fs::write(&tiny, b"MZ").ok();
+        check!(
+            update::validate_exe(&tiny).is_err(),
+            "update: 过小的安装文件会被拒绝"
+        );
+
+        let not_exe = dir.join("fake.exe");
+        std::fs::write(&not_exe, vec![b'X'; 4096]).ok();
+        check!(
+            update::validate_exe(&not_exe).is_err(),
+            "update: 没有 MZ 头的文件会被拒绝"
+        );
+
+        let good = dir.join("good.exe");
+        let mut bytes = vec![b'\0'; 4096];
+        bytes[0] = b'M';
+        bytes[1] = b'Z';
+        std::fs::write(&good, &bytes).ok();
+        check!(
+            update::validate_exe(&good).is_ok(),
+            "update: 带 MZ 头的完整文件会被接受"
+        );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    // 偏好文件的兼容性：老 prefs.json 没有新字段时必须保持原有行为。
+    {
+        use crate::prefs::Prefs;
+        let old: Prefs = serde_json::from_str(r#"{"theme":"neon"}"#).unwrap();
+        check!(
+            old.auto_update,
+            "prefs: 缺少 auto_update 字段时默认为开启"
+        );
+        check!(
+            old.skipped_version.is_empty(),
+            "prefs: 缺少 skipped_version 字段时默认为空"
+        );
+        let full = Prefs {
+            theme: "ice".to_string(),
+            skipped_version: "1.3.0".to_string(),
+            auto_update: false,
+        };
+        let text = serde_json::to_string(&full).unwrap();
+        let back: Prefs = serde_json::from_str(&text).unwrap();
+        check!(
+            back.skipped_version == "1.3.0" && !back.auto_update,
+            "prefs: 跳过版本与自动检查开关能完整往返"
+        );
+    }
+
+    // 真的落一次盘：用 ZERO_DATA_DIR 指向临时目录，确认写入后能读回来，
+    // 而且不会碰到用户自己的 %APPDATA%\Zero。
+    {
+        use crate::prefs;
+        let dir = std::env::temp_dir().join("zero-selftest-prefs");
+        std::fs::remove_dir_all(&dir).ok();
+        std::env::set_var("ZERO_DATA_DIR", &dir);
+        prefs::set_skipped_version("9.9.9");
+        prefs::set_auto_update(false);
+        let loaded = prefs::load();
+        check!(
+            loaded.skipped_version == "9.9.9",
+            "prefs: 跳过版本写盘后能读回来"
+        );
+        check!(!loaded.auto_update, "prefs: 自动检查开关写盘后能读回来");
+        check!(
+            dir.join("prefs.json").is_file(),
+            "prefs: 偏好确实写进了 ZERO_DATA_DIR 指定的目录"
+        );
+        std::env::remove_var("ZERO_DATA_DIR");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
     log.push_str(if ok { "\nRESULT: PASS\n" } else { "\nRESULT: FAIL\n" });
     std::fs::write("selftest.log", log).ok();
     ok

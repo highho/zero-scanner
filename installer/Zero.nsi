@@ -1,11 +1,11 @@
-﻿Unicode true
+Unicode true
 !include "MUI2.nsh"
 !include "LogicLib.nsh"
 !include "FileFunc.nsh"
 
 !define APP_NAME "Zero 智能内存工作台"
 !define APP_EXE "zero-scanner.exe"
-!define APP_VERSION "1.1.0"
+!define APP_VERSION "1.2.0"
 !define PUBLISHER "highho"
 !define APP_URL "https://github.com/highho/zero-scanner"
 !define UNINST_KEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\ZeroScanner"

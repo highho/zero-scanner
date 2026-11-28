@@ -71,6 +71,10 @@
 
 ![设置](docs/settings.png)
 
+更新卡片在设置页下方，写清楚当前版本、目标版本、体积和发布说明，跳过或关闭自动检查都记在这里：
+
+![自动更新](docs/settings-update.png)
+
 **主题**——设置里一键切换 8 套内置主题；界面颜色全部来自运行时调色板，浅色深色都有。
 
 ![主题设置](docs/settings-themes.png)
@@ -94,29 +98,32 @@ Zero 1.2 把界面颜色从编译期常量换成了**运行时主题引擎**：
 
 | 环节 | 做法 |
 | --- | --- |
-| 查什么 | \`GET https://gh-proxy.com/https://api.github.com/repos/highho/zero-scanner/releases/latest\`，只读 tag、发布说明和资产清单 |
-| 比什么 | 三段版本号数字比较，\`v1.1.0\` 与 \`1.1.0\` 等价；只认比当前版本更大的发布 |
-| 下载哪个 | 优先裸 \`zero-scanner.exe\`（就地替换，不跑安装器），没有就退回 \`*-setup-x64.exe\` |
-| 什么时候查 | 启动后自动查一次，之后最多每 6 小时一次；也可以随时点「检查更新」 |
-| 下载到哪 | \`%TEMP%\zero-update\`，先写 \`.part\`，字节数与发布信息对得上才改成正式文件 |
-| 怎么换 | 生成一个 \`apply.cmd\`：等本进程退出 → \`move /Y\` 覆盖安装目录里的 exe → 启动新版 → 删掉自己 |
-| 不想升 | 「跳过此版本」只压住这一个版本，下个版本还会提醒 |
+| 查什么 | `GET https://gh-proxy.com/https://api.github.com/repos/highho/zero-scanner/releases/latest`，只读 tag、发布说明和资产清单 |
+| 比什么 | 三段版本号数字比较，`v1.1.0` 与 `1.1.0` 等价；只认比当前版本更大的发布 |
+| 下载哪个 | 优先裸 `zero-scanner.exe`（就地替换，不跑安装器），没有就退回 `*-setup-x64.exe` |
+| 什么时候查 | 启动后自动查一次，之后最多每 6 小时一次；设置里可以整个关掉，也可以随时点「检查更新」 |
+| 下载到哪 | `%TEMP%\zero-update`，先写 `.part`，字节数与发布信息对得上才改成正式文件 |
+| 装之前查什么 | 文件还在不在、够不够大、开头是不是 MZ 头；缺一样就直接报错，不会拉起替换脚本 |
+| 怎么换 | 生成一个 `apply.cmd`：等本进程退出 → `move /Y` 覆盖安装目录里的 exe → 启动新版 → 删掉自己 |
+| 不想升 | 「跳过此版本」写进 `prefs.json`，重启后也不会再提这个版本，下个版本照常提醒 |
+| 怎么关 | 设置里的「启动后自动检查更新」可以整个关掉，之后只能手动点「检查更新」 |
 
 几个刻意的选择：
 
-- **镜像可换**：默认走 \`gh-proxy.com\`（国内直连 GitHub 常常超时）。常量在 \`app/src/update.rs\`，改一个 \`PROXY\` 就行，留空则直连。
-- **不加依赖**：HTTP 走 Windows 自带的 WinHTTP（\`windows-sys\` 已经在依赖里），没有引入 \`reqwest\` 之类的运行时；顺便处理了本机证书吊销检查离线的情况——严格握手失败时，带 \`SECURITY_FLAG_IGNORE_REVOCATION\` 再试一次。
+- **镜像可换**：默认走 `gh-proxy.com`（国内直连 GitHub 常常超时）。常量在 `app/src/update.rs`，改一个 `PROXY` 就行，留空则直连。
+- **不加依赖**：HTTP 走 Windows 自带的 WinHTTP（`windows-sys` 已经在依赖里），没有引入 `reqwest` 之类的运行时；顺便处理了本机证书吊销检查离线的情况——严格握手失败时，带 `SECURITY_FLAG_IGNORE_REVOCATION` 再试一次。
 - **失败不吵人**：自动检查连不上就安静地跳过，只有手动检查失败才提示原因，界面里也不会冒出更新失败的弹窗。
+- **失败要看得见**：替换脚本把 `move` 的结果写进 `%TEMP%\zero-update\apply.log`（`OK` / `FAILED` / `STARTED`），不像以前那样把错误吞掉——「点了更新什么都没发生」是最难查的那种故障。
 - **只读不报**：更新链路只从 GitHub 读版本和文件，不上报任何信息，不做统计。
 
 自检命令（不打开界面，直接打印结论）：
 
-\`\`\`bash
+```bash
 zero-scanner.exe --update-check                # 查最新发布，打印结论
 zero-scanner.exe --update-download <目录>       # 真的走一遍下载，把文件放到指定目录
 zero-scanner.exe --update-download-any <目录>   # 忽略版本比较强制下载（验证下载链路用）
 zero-scanner.exe --update-apply-from <文件>     # 走一遍替换并重启（验证更新脚本用）
-\`\`\`
+```
 
 ## 功能
 
@@ -248,7 +255,7 @@ MCP listening on http://127.0.0.1:3780/mcp?token=9f2c1d...（32 位随机串）
 | --- | --- |
 | `zero-scanner.exe` | 图形界面 |
 | `zero-scanner.exe --mcp <port>` | 无界面启动 MCP 服务（不写端口默认 3777） |
-| `zero-scanner.exe --selftest` | 跑 126 项自检，结论写 `selftest.log`，退出码即结果 |
+| `zero-scanner.exe --selftest` | 跑 136 项自检，结论写 `selftest.log`，退出码即结果 |
 | `zero-scanner.exe --verify <pid>` | 对目标进程做 8 项可用性验证 |
 | `zero-scanner.exe --e2e <pid> [info]` | 23 项端到端验证（配合 `e2e_target.py`） |
 | `zero-scanner.exe --screenshot <png> --tab <名字>` | 渲染某个页面为 PNG（界面回归用，加 `--settings` 连设置弹窗一起） |
@@ -321,7 +328,7 @@ MCP listening on http://127.0.0.1:3780/mcp?token=9f2c1d...（32 位随机串）
 │     ├─ session.rs      工作区持久化
 │     ├─ hotkey.rs       快捷键
 │     ├─ mcp.rs          MCP 服务
-│     ├─ selftest.rs     109 项自检
+│     ├─ selftest.rs     136 项自检
 │     ├─ e2e.rs          端到端验证
 │     └─ model.rs        值类型与扫描类型
 └─ e2e_target.py         端到端测试目标进程
@@ -361,7 +368,7 @@ bash installer/build.sh
 两条独立的证据线：**断言管逻辑，截图管渲染**。
 
 ```bash
-# 109 项自检：扫描 / 指针 / 反汇编 / 补丁 / 汇编 / CT / 分诊 / Lua ……
+# 136 项自检：扫描 / 指针 / 反汇编 / 补丁 / 汇编 / CT / 分诊 / Lua / 更新 / 偏好 ……
 zero-scanner.exe --selftest
 
 # 23 项端到端：起一个真实目标进程，把整条链路跑一遍
