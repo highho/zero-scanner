@@ -4,6 +4,7 @@ mod aob;
 mod addr;
 mod assembler;
 mod ctable;
+mod debugger;
 mod app;
 mod disasm;
 mod e2e;
