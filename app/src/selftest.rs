@@ -1143,6 +1143,146 @@ pub fn run() -> bool {
         std::fs::remove_dir_all(&dir).ok();
     }
 
+
+    // 调试器：真实附加子进程靶场，设硬件写断点，验证命中与 detach 无残留。
+    {
+        use crate::debugger::{self, BpKind, Slot};
+        // 独立落盘追踪（不捕获 log 以避免与 check! 的借用冲突）。
+        fn trace(label: &str) {
+            use std::io::Write;
+            if let Ok(mut f) = std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open("selftest.log")
+            {
+                let _ = writeln!(f, "....  debugger: {label}");
+            }
+        }
+        let info = std::env::temp_dir().join("zero-selftest-dbg.info");
+        std::fs::remove_file(&info).ok();
+        let exe = match std::env::current_exe() {
+            Ok(p) => p,
+            Err(e) => {
+                ok = false;
+                log.push_str(&format!("FAIL  debugger: locate exe: {e}\n"));
+                return false;
+            }
+        };
+        match std::process::Command::new(&exe)
+            .arg("--dbg-target")
+            .arg(&info)
+            .spawn()
+        {
+            Ok(mut child) => {
+                trace("spawned target child");
+                // （stdout 被屏蔽，只能走文件）
+                let mut pid = None;
+                let mut addr = None;
+                for _ in 0..50 {
+                    if let Ok(text) = std::fs::read_to_string(&info) {
+                        for line in text.lines() {
+                            if let Some(v) = line.strip_prefix("pid=") {
+                                pid = v.trim().parse::<u32>().ok();
+                            }
+                            if let Some(v) = line.strip_prefix("addr=") {
+                                addr =
+                                    u64::from_str_radix(v.trim().trim_start_matches("0x"), 16).ok();
+                            }
+                        }
+                        if pid.is_some() && addr.is_some() {
+                            break;
+                        }
+                    }
+                    std::thread::sleep(Duration::from_millis(50));
+                }
+                let pid = pid.unwrap_or(0);
+                let addr = addr.unwrap_or(0);
+                trace(&format!("target pid={pid} addr={addr:#X}"));
+                check!(
+                    pid != 0 && addr != 0,
+                    "debugger: spawned target pid={pid} addr={addr:#X}"
+                );
+                let handle = winmem::open_process(pid, "debug-target").ok();
+                check!(handle.is_some(), "debugger: opened target process");
+                if let Some(handle) = handle {
+                    match debugger::DebugSession::start(pid, &handle) {
+                        Ok(session) => {
+                            trace("DebugSession started");
+                            let mut attached = false;
+                            for _ in 0..50 {
+                                if session.status().attached { attached = true; break; }
+                                if session.status().error.is_some() { break; }
+                                std::thread::sleep(Duration::from_millis(40));
+                            }
+                            check!(attached, "debugger: attached (error={:?})", session.status().error);
+                            match session.set_breakpoint(Slot(0), addr, BpKind::Write) {
+                                Ok(()) => {
+                                    trace("breakpoint queued");
+                                    // 等最多 4 秒积累命中
+                                    let mut hits = 0;
+                                    for _ in 0..80 {
+                                        std::thread::sleep(Duration::from_millis(50));
+                                        hits = session.hits().len();
+                                        if hits >= 3 {
+                                            break;
+                                        }
+                                    }
+                                    check!(
+                                        hits >= 1,
+                                        "debugger: hardware write breakpoint hit {hits} times"
+                                    );
+                                    let records = session.hits();
+                                    if let Some(rec) = records.last() {
+                                        check!(
+                                            rec.rip != 0,
+                                            "debugger: hit carries a RIP ({:#X})",
+                                            rec.rip
+                                        );
+                                        check!(
+                                            !rec.bytes.is_empty(),
+                                            "debugger: hit recorded instruction bytes"
+                                        );
+                                        check!(
+                                            rec.written.is_some(),
+                                            "debugger: hit reads back the written value"
+                                        );
+                                    }
+                                    // detach：stop 后事件线程应退出，目标进程仍活着、仍可再打开。
+                                    trace(&format!("hits={hits} waiting done"));
+                                    session.stop();
+                                    let _ = session.wait_done(Duration::from_secs(5));
+                                    check!(
+                                        session.status().error.is_none(),
+                                        "debugger: detach clean (error={:?})",
+                                        session.status().error
+                                    );
+                                    check!(
+                                        winmem::open_process(pid, "debug-target").is_ok(),
+                                        "debugger: target still alive after detach"
+                                    );
+                                }
+                                Err(e) => {
+                                    ok = false;
+                                    log.push_str(&format!("FAIL  debugger: set breakpoint: {e}\n"));
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            ok = false;
+                            log.push_str(&format!("FAIL  debugger: attach: {e}\n"));
+                        }
+                    }
+                }
+                let _ = child.kill();
+                let _ = child.wait();
+            }
+            Err(e) => {
+                ok = false;
+                log.push_str(&format!("FAIL  debugger: spawn target: {e}\n"));
+            }
+        }
+        std::fs::remove_file(&info).ok();
+    }
     log.push_str(if ok { "\nRESULT: PASS\n" } else { "\nRESULT: FAIL\n" });
     std::fs::write("selftest.log", log).ok();
     ok

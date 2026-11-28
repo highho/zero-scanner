@@ -3,6 +3,7 @@ use crate::assembler;
 use crate::ctable;
 use crate::session;
 use crate::speed;
+use crate::debugger::{self, DebugSession, BpKind, Slot};
 use crate::disasm;
 use crate::focus;
 use crate::hotkey;
@@ -41,6 +42,7 @@ pub enum Tab {
     Speed,
     Script,
     Struct,
+    Debugger,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -164,6 +166,11 @@ pub struct ZeroApp {
     pub sym_error: Option<String>,
     pub sym_show_imports: bool,
     pub sym_elapsed: Duration,
+
+    pub dbg: Option<Arc<DebugSession>>,
+    pub dbg_addr: String,
+    pub dbg_kind: BpKind,
+    pub dbg_error: Option<String>,
 
     pub entries: Vec<Entry>,
     pub next_entry_id: u64,
@@ -403,6 +410,10 @@ impl ZeroApp {
             sym_error: None,
             sym_show_imports: false,
             sym_elapsed: Duration::ZERO,
+            dbg: None,
+            dbg_addr: String::new(),
+            dbg_kind: BpKind::Write,
+            dbg_error: None,
             practice_child: None,
             practice_pid: None,
             practice_pending: None,
@@ -680,6 +691,7 @@ impl ZeroApp {
             Tab::Speed => self.ui_speed(ui),
             Tab::Script => self.ui_script(ui),
             Tab::Struct => self.ui_struct(ui),
+            Tab::Debugger => self.ui_debugger(ui),
         }
     }
 
@@ -774,6 +786,11 @@ impl ZeroApp {
     }
 
     pub fn detach(&mut self) {
+        if let Some(dbg) = &self.dbg {
+            dbg.stop();
+        }
+        self.dbg = None;
+        self.dbg_error = None;
         if let Some(job) = &self.scan_job {
             job.cancel.store(true, Ordering::Relaxed);
         }
@@ -2944,6 +2961,7 @@ fn tab_tag(tab: Tab) -> &'static str {
         Tab::Speed => "speed",
         Tab::Script => "script",
         Tab::Struct => "struct",
+        Tab::Debugger => "debugger",
     }
 }
 
@@ -3059,6 +3077,7 @@ impl eframe::App for ZeroApp {
                         | Tab::Speed
                         | Tab::Script
                         | Tab::Struct
+                        | Tab::Debugger
                 );
                 if scroll_page {
                     egui::ScrollArea::vertical()

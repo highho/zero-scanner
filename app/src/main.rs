@@ -40,6 +40,14 @@ fn main() -> eframe::Result<()> {
     if args.iter().any(|a| a == "--practice-target") {
         return practice::run();
     }
+    if args.iter().any(|a| a == "--dbg-target") {
+        return debugger::target_main();
+    }
+    if args.iter().any(|a| a == "--dbg-test") {
+        // 专用调试器闭环验证：spawn 靶场 -> 附加 -> 设写断点 -> 等命中 -> detach。
+        let code = debugger::cli_test();
+        std::process::exit(if code { 0 } else { 1 });
+    }
     if let Some(pos) = args.iter().position(|a| a == "--e2e") {
         // --e2e <pid> <info-file>
         let pid = args.get(pos + 1).and_then(|s| s.parse::<u32>().ok());
@@ -254,6 +262,7 @@ fn parse_tab(args: &[String]) -> Option<Tab> {
                 "speed" => Some(Tab::Speed),
                 "script" | "lua" => Some(Tab::Script),
                 "struct" | "dissect" => Some(Tab::Struct),
+                "debugger" | "breakpoint" => Some(Tab::Debugger),
                 _ => Some(Tab::Scan),
             };
         }

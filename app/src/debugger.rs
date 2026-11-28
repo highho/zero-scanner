@@ -17,7 +17,7 @@
 use crate::winmem::ProcessHandle;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{mpsc, Arc, Mutex};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 use windows_sys::Win32::Foundation::{
     CloseHandle, GetLastError, DBG_CONTINUE, DBG_EXCEPTION_NOT_HANDLED, HANDLE, NTSTATUS,
 };
@@ -151,6 +151,7 @@ struct Shared {
     attached: bool,
     pid: u32,
     is_64bit: bool,
+    done: Option<mpsc::Receiver<()>>,
 }
 
 #[derive(Clone)]
@@ -167,7 +168,6 @@ struct ThreadState {
 pub struct DebugSession {
     shared: Arc<Mutex<Shared>>,
     stop: Arc<AtomicBool>,
-    pub done: Option<mpsc::Receiver<()>>,
     _handle: Option<std::thread::JoinHandle<()>>,
 }
 
@@ -177,6 +177,7 @@ impl DebugSession {
         // 由同一线程调用（否则返回 ERROR_INVALID_HANDLE=6）。所以附加动作移到
         // 事件线程里做；start() 只 spawn 线程并立即返回，调用方轮询
         // status() 直到 attached==true 或 error 出现。
+        let (done_tx, done_rx) = mpsc::channel::<()>();
         let shared = Arc::new(Mutex::new(Shared {
             slots: [None, None, None, None],
             hits: Vec::new(),
@@ -185,9 +186,9 @@ impl DebugSession {
             attached: false,
             pid,
             is_64bit: target.is_64bit,
+            done: Some(done_rx),
         }));
         let stop = Arc::new(AtomicBool::new(false));
-        let (done_tx, done_rx) = mpsc::channel::<()>();
 
         let shared_2 = shared.clone();
         let stop_2 = stop.clone();
@@ -209,7 +210,6 @@ impl DebugSession {
         Ok(Arc::new(DebugSession {
             shared,
             stop,
-            done: Some(done_rx),
             _handle: Some(handle),
         }))
     }
@@ -267,6 +267,15 @@ impl DebugSession {
 
     pub fn hits(&self) -> Vec<HitRecord> {
         self.shared.lock().map(|s| s.hits.clone()).unwrap_or_default()
+    }
+
+    /// 等事件线程退出（detach 完成）。receiver 只被消费一次。
+    pub fn wait_done(&self, timeout: Duration) -> bool {
+        let rx = self.shared.lock().ok().and_then(|mut s| s.done.take());
+        match rx {
+            Some(rx) => rx.recv_timeout(timeout).is_ok(),
+            None => true,
+        }
     }
 }
 
@@ -1053,9 +1062,7 @@ pub fn cli_test() -> bool {
                 check!(rec.written.is_some(), "命中读回写入值");
             }
             session.stop();
-            if let Some(done) = &session.done {
-                let _ = done.recv_timeout(std::time::Duration::from_secs(5));
-            }
+            let _ = session.wait_done(std::time::Duration::from_secs(5));
             check!(session.status().error.is_none(), "detach 无错误 ({:?})", session.status().error);
             check!(
                 crate::winmem::open_process(pid, "dbg-target").is_ok(),

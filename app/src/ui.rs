@@ -1,4 +1,5 @@
 use crate::app::{EditState, ScanPhase, Tab, ZeroApp};
+use crate::debugger::{self, DebugSession, BpKind, Slot};
 use crate::model::{format_bytes, parse_address, ScanType, VType};
 use crate::disasm;
 use crate::hotkey;
@@ -323,6 +324,7 @@ impl ZeroApp {
                 self.nav_item(ui, Tab::Speed, IconKind::Play, "变速齿轮", None);
                 self.nav_item(ui, Tab::Script, IconKind::Bolt, "Lua 脚本", None);
                 self.nav_item(ui, Tab::Struct, IconKind::Structure, "结构浏览", None);
+                self.nav_item(ui, Tab::Debugger, IconKind::Bolt, "调试器", None);
                 ui.add_space(14.0);
                 theme::divider(ui);
                 ui.add_space(10.0);
@@ -469,6 +471,158 @@ impl ZeroApp {
             }
         }
     }
+
+    /// 调试器页：谁在改这个地址。
+    pub fn ui_debugger(&mut self, ui: &mut egui::Ui) {
+        heading(ui, "谁在改它？", "对地址设硬件书写断点，命中后看指令与寄存器");
+
+        if !self.is_attached() {
+            empty_state(ui, IconKind::Bolt, "先连接一个进程", "在顶部选择游戏进程，再回来设断点。");
+            return;
+        }
+        let Some(handle) = self.process.clone() else { return; };
+        let pid = self.attached_pid.unwrap_or(0);
+
+        ui.add_space(10.0);
+        theme::card_frame().show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            theme::section_label(ui, "断点");
+            ui.add_space(6.0);
+            ui.horizontal(|ui| {
+                ui.label("地址：");
+                ui.add(
+                    egui::TextEdit::singleline(&mut self.dbg_addr)
+                        .hint_text("game.exe+1A2B 或 0x7FF6...")
+                        .desired_width(260.0),
+                );
+                ui.label("类型：");
+                ui.selectable_value(&mut self.dbg_kind, BpKind::Write, "写入");
+                ui.selectable_value(&mut self.dbg_kind, BpKind::ReadWrite, "读写");
+                ui.add_space(8.0);
+                let started = self.dbg.is_some();
+                let enable = ui.add_enabled(!started, egui::Button::new("开始调试"));
+                let stop = ui.add_enabled(started, egui::Button::new("停止"));
+                if enable.clicked() {
+                    let text = self.dbg_addr.trim();
+                    match self.resolve_addr_attached(text) {
+                        Some(addr) => match DebugSession::start(pid, &handle) {
+                            Ok(session) => {
+                                let kind = self.dbg_kind;
+                                self.dbg = Some(session.clone());
+                                // 附加是异步的：轮询等 attached，然后设断点。
+                                let sess = session.clone();
+                                std::thread::spawn(move || {
+                                    for _ in 0..50 {
+                                        if sess.status().attached { break; }
+                                        if sess.status().error.is_some() { break; }
+                                        std::thread::sleep(Duration::from_millis(40));
+                                    }
+                                    let _ = sess.set_breakpoint(Slot(0), addr, kind);
+                                });
+                                self.dbg_error = None;
+                                self.toast(format!("已附加调试器（PID {pid}）……"), ToastKind::Info);
+                            }
+                            Err(e) => {
+                                self.dbg_error = Some(e.clone());
+                                self.toast(e, ToastKind::Error);
+                            }
+                        },
+                        None => self.toast("地址无法解析，请用 模块名+偏移 或十六进制。", ToastKind::Warn),
+                    }
+                }
+                if stop.clicked() {
+                    if let Some(dbg) = &self.dbg {
+                        dbg.stop();
+                    }
+                    self.dbg = None;
+                    self.dbg_addr.clear();
+                    self.toast("调试已停止，断点已清除。", ToastKind::Info);
+                }
+            });
+            if let Some(err) = &self.dbg_error {
+                ui.add_space(6.0);
+                ui.label(
+                    egui::RichText::new(format!("⚠ {err}"))
+                        .size(12.0)
+                        .color(theme::warn()),
+                );
+            }
+            if let Some(dbg) = &self.dbg {
+                let status = dbg.status();
+                ui.add_space(6.0);
+                ui.label(
+                    egui::RichText::new(format!(
+                        "状态：{} · 命中 {} 次",
+                        if status.attached { "已附加" } else { "未附加" },
+                        status.hits
+                    ))
+                    .size(12.0)
+                    .color(theme::muted()),
+                );
+            }
+        });
+
+        // 命中历史
+        ui.add_space(8.0);
+        theme::card_frame().show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            theme::section_label(ui, "命中历史");
+            ui.add_space(4.0);
+            let Some(dbg) = &self.dbg else {
+                ui.label(egui::RichText::new("还没有命中。设一个断点，然后去游戏里改那个值。").size(12.0).color(theme::muted()));
+                return;
+            };
+            let records = dbg.hits();
+            if records.is_empty() {
+                ui.label(egui::RichText::new("断点已设，等待命中……").size(12.0).color(theme::muted()));
+                return;
+            }
+            for rec in records.iter().rev() {
+                theme::soft_card().show(ui, |ui| {
+                    ui.set_width(ui.available_width());
+                    ui.horizontal(|ui| {
+                        ui.label(
+                            egui::RichText::new(format!("@{:#X}", rec.rip))
+                                .size(12.5)
+                                .strong()
+                                .color(theme::accent()),
+                        );
+                        ui.label(
+                            egui::RichText::new(&rec.asm)
+                                .size(12.5)
+                                .monospace()
+                                .color(theme::text()),
+                        );
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            ui.label(
+                                egui::RichText::new(format!(
+                                    "线程 {} · 写后 {}",
+                                    rec.thread,
+                                    rec.written.map(|v| format!("{v}")).unwrap_or_else(|| "?".to_string())
+                                ))
+                                .size(10.5)
+                                .color(theme::faint()),
+                            );
+                        });
+                    });
+                    ui.add_space(3.0);
+                    let cols = rec.regs.rows();
+                    let mut line = String::new();
+                    for (i, (name, val)) in cols.chunks(6).take(1).flatten().enumerate() {
+                        if i > 0 { line.push_str("   "); }
+                        line.push_str(&format!("{name}={val}"));
+                    }
+                    ui.label(
+                        egui::RichText::new(line).size(10.5).monospace().color(theme::muted()),
+                    );
+                });
+                ui.add_space(4.0);
+            }
+        });
+        // 本帧结束时没再需要持续刷新：命中会由后台线程更新，UI 靠常规重绘即可。
+        ui.ctx().request_repaint_after(Duration::from_millis(500));
+    }
+
 
     pub fn ui_statusbar(&mut self, ctx: &egui::Context) {
         egui::TopBottomPanel::bottom("zero_status")
