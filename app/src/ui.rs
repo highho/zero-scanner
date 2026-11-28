@@ -15,8 +15,8 @@ use std::time::Duration;
 fn heading(ui: &mut egui::Ui, title: &str, subtitle: &str) {
     ui.horizontal(|ui| {
         ui.vertical(|ui| {
-            ui.label(egui::RichText::new(title).size(26.0).strong().color(theme::TEXT));
-            ui.label(egui::RichText::new(subtitle).size(12.5).color(theme::MUTED));
+            ui.label(egui::RichText::new(title).size(26.0).strong().color(theme::text()));
+            ui.label(egui::RichText::new(subtitle).size(12.5).color(theme::muted()));
         });
     });
 }
@@ -25,12 +25,12 @@ fn icon_text_button(ui: &mut egui::Ui, icon: IconKind, text: &str) -> Response {
     let galley = ui.painter().layout_no_wrap(
         text.to_string(),
         FontId::proportional(13.0),
-        theme::MUTED,
+        theme::muted(),
     );
     let size = Vec2::new(galley.size().x + 42.0, 36.0);
     let (rect, response) = ui.allocate_exact_size(size, Sense::click());
     let fill = if response.hovered() {
-        theme::CARD_HI
+        theme::card_hi()
     } else {
         Color32::from_rgb(15, 21, 34)
     };
@@ -38,7 +38,7 @@ fn icon_text_button(ui: &mut egui::Ui, icon: IconKind, text: &str) -> Response {
     ui.painter().rect_stroke(
         rect,
         Rounding::same(9.0),
-        Stroke::new(1.0, theme::BORDER_SOFT),
+        Stroke::new(1.0, theme::border_soft()),
     );
     theme::paint_icon(
         ui.painter(),
@@ -47,19 +47,19 @@ fn icon_text_button(ui: &mut egui::Ui, icon: IconKind, text: &str) -> Response {
             Vec2::splat(15.0),
         ),
         icon,
-        theme::MUTED,
+        theme::muted(),
     );
     ui.painter().galley(
         rect.left_center() + Vec2::new(31.0, -galley.size().y / 2.0),
         galley,
-        theme::MUTED,
+        theme::muted(),
     );
     response
 }
 
 fn toggle_switch(ui: &mut egui::Ui, on: bool) -> Response {
     let (rect, response) = ui.allocate_exact_size(Vec2::new(34.0, 19.0), Sense::click());
-    let bg = if on { theme::SUCCESS } else { Color32::from_rgb(45, 56, 75) };
+    let bg = if on { theme::success() } else { Color32::from_rgb(45, 56, 75) };
     ui.painter().rect_filled(rect, Rounding::same(10.0), bg);
     let knob_x = if on {
         rect.right() - 9.5
@@ -83,8 +83,8 @@ fn progress_bar(ui: &mut egui::Ui, fraction: f32) {
     theme::paint_gradient_rect(
         ui.painter(),
         fill,
-        theme::ACCENT,
-        theme::ACCENT_2,
+        theme::accent(),
+        theme::accent_2(),
         Rounding::same(4.0),
     );
 }
@@ -93,11 +93,11 @@ fn numbered_step(ui: &mut egui::Ui, n: u32, text: &str, current: bool, done: boo
     ui.horizontal(|ui| {
         let (rect, _) = ui.allocate_exact_size(Vec2::splat(22.0), Sense::hover());
         let color = if done {
-            theme::SUCCESS
+            theme::success()
         } else if current {
-            theme::ACCENT
+            theme::accent()
         } else {
-            theme::FAINT
+            theme::faint()
         };
         ui.painter()
             .circle_filled(rect.center(), 11.0, color.gamma_multiply(if current { 0.2 } else { 0.1 }));
@@ -117,7 +117,7 @@ fn numbered_step(ui: &mut egui::Ui, n: u32, text: &str, current: bool, done: boo
         ui.label(
             egui::RichText::new(text)
                 .size(12.5)
-                .color(if current { theme::TEXT } else { theme::MUTED }),
+                .color(if current { theme::text() } else { theme::muted() }),
         );
     });
 }
@@ -129,15 +129,15 @@ fn empty_state(ui: &mut egui::Ui, icon: IconKind, title: &str, body: &str) {
         ui.painter().circle_filled(
             rect.center(),
             26.0,
-            theme::ACCENT.gamma_multiply(0.10),
+            theme::accent().gamma_multiply(0.10),
         );
-        theme::paint_icon(ui.painter(), rect.shrink(16.0), icon, theme::ACCENT);
+        theme::paint_icon(ui.painter(), rect.shrink(16.0), icon, theme::accent());
         ui.add_space(6.0);
         ui.label(egui::RichText::new(title).size(15.0).strong());
         ui.label(
             egui::RichText::new(body)
                 .size(12.0)
-                .color(theme::MUTED),
+                .color(theme::muted()),
         );
         ui.add_space(8.0);
     });
@@ -153,9 +153,9 @@ impl ZeroApp {
             .exact_height(70.0)
             .frame(
                 Frame::none()
-                    .fill(theme::PANEL)
+                    .fill(theme::panel())
                     .inner_margin(Margin::symmetric(18.0, 11.0))
-                    .stroke(Stroke::new(1.0, theme::BORDER_SOFT)),
+                    .stroke(Stroke::new(1.0, theme::border_soft())),
             )
             .show(ctx, |ui| {
                 ui.horizontal(|ui| {
@@ -167,12 +167,12 @@ impl ZeroApp {
                             egui::RichText::new("ZERO")
                                 .size(18.0)
                                 .strong()
-                                .color(theme::TEXT),
+                                .color(theme::text()),
                         );
                         ui.label(
                             egui::RichText::new("SMART MEMORY LAB")
                                 .size(9.0)
-                                .color(theme::FAINT),
+                                .color(theme::faint()),
                         );
                     });
                     ui.add_space(22.0);
@@ -183,14 +183,14 @@ impl ZeroApp {
                     ui.painter().rect_filled(
                         rect,
                         Rounding::same(12.0),
-                        if hovered { theme::CARD_HI } else { theme::CARD_SOFT },
+                        if hovered { theme::card_hi() } else { theme::card_soft() },
                     );
                     ui.painter().rect_stroke(
                         rect,
                         Rounding::same(12.0),
                         Stroke::new(
                             1.0,
-                            if hovered { theme::ACCENT.gamma_multiply(0.6) } else { theme::BORDER },
+                            if hovered { theme::accent().gamma_multiply(0.6) } else { theme::border() },
                         ),
                     );
                     let icon_rect = egui::Rect::from_center_size(
@@ -198,8 +198,8 @@ impl ZeroApp {
                         Vec2::splat(28.0),
                     );
                     ui.painter()
-                        .rect_filled(icon_rect, Rounding::same(8.0), theme::ACCENT.gamma_multiply(0.14));
-                    theme::paint_icon(ui.painter(), icon_rect.shrink(7.0), IconKind::Practice, theme::ACCENT);
+                        .rect_filled(icon_rect, Rounding::same(8.0), theme::accent().gamma_multiply(0.14));
+                    theme::paint_icon(ui.painter(), icon_rect.shrink(7.0), IconKind::Practice, theme::accent());
                     if self.is_attached() {
                         let name = if self.process_name.chars().count() > 24 {
                             let s: String = self.process_name.chars().take(22).collect();
@@ -212,7 +212,7 @@ impl ZeroApp {
                             Align2::LEFT_CENTER,
                             name,
                             FontId::proportional(13.5),
-                            theme::TEXT,
+                            theme::text(),
                         );
                         let detail = format!(
                             "PID {}  ·  {}  ·  {}",
@@ -225,7 +225,7 @@ impl ZeroApp {
                             Align2::LEFT_CENTER,
                             detail,
                             FontId::proportional(10.5),
-                            theme::FAINT,
+                            theme::faint(),
                         );
                     } else {
                         ui.painter().text(
@@ -233,14 +233,14 @@ impl ZeroApp {
                             Align2::LEFT_CENTER,
                             "选择进程",
                             FontId::proportional(13.5),
-                            theme::TEXT,
+                            theme::text(),
                         );
                         ui.painter().text(
                             rect.left_center() + Vec2::new(46.0, 10.0),
                             Align2::LEFT_CENTER,
                             "连接一个正在运行的游戏",
                             FontId::proportional(10.5),
-                            theme::FAINT,
+                            theme::faint(),
                         );
                     }
                     theme::paint_icon(
@@ -250,7 +250,7 @@ impl ZeroApp {
                             Vec2::splat(14.0),
                         ),
                         IconKind::ChevronRight,
-                        theme::FAINT,
+                        theme::faint(),
                     );
                     if response.clicked() {
                         self.open_picker();
@@ -258,11 +258,11 @@ impl ZeroApp {
 
                     ui.add_space(10.0);
                     if self.scan_phase == ScanPhase::Running {
-                        theme::status_chip(ui, "扫描中", theme::WARN);
+                        theme::status_chip(ui, "扫描中", theme::warn());
                     } else if self.is_attached() {
-                        theme::status_chip(ui, "已连接", theme::SUCCESS);
+                        theme::status_chip(ui, "已连接", theme::success());
                     } else {
-                        theme::status_chip(ui, "未连接", theme::FAINT);
+                        theme::status_chip(ui, "未连接", theme::faint());
                     }
 
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
@@ -294,9 +294,9 @@ impl ZeroApp {
             .resizable(false)
             .frame(
                 Frame::none()
-                    .fill(theme::SIDEBAR)
+                    .fill(theme::sidebar())
                     .inner_margin(Margin::symmetric(14.0, 16.0))
-                    .stroke(Stroke::new(1.0, theme::BORDER_SOFT)),
+                    .stroke(Stroke::new(1.0, theme::border_soft())),
             )
             .show(ctx, |ui| {
                 ui.add_space(4.0);
@@ -322,6 +322,7 @@ impl ZeroApp {
                 self.nav_item(ui, Tab::Table, IconKind::List, "CT 表格", None);
                 self.nav_item(ui, Tab::Speed, IconKind::Play, "变速齿轮", None);
                 self.nav_item(ui, Tab::Script, IconKind::Bolt, "Lua 脚本", None);
+                self.nav_item(ui, Tab::Struct, IconKind::Structure, "结构浏览", None);
                 ui.add_space(14.0);
                 theme::divider(ui);
                 ui.add_space(10.0);
@@ -332,12 +333,12 @@ impl ZeroApp {
                     ui.horizontal(|ui| {
                         let (rect, _) = ui.allocate_exact_size(Vec2::splat(28.0), Sense::hover());
                         ui.painter()
-                            .circle_filled(rect.center(), 13.0, theme::ACCENT.gamma_multiply(0.12));
+                            .circle_filled(rect.center(), 13.0, theme::accent().gamma_multiply(0.12));
                         theme::paint_icon(
                             ui.painter(),
                             rect.shrink(7.0),
                             IconKind::Practice,
-                            theme::ACCENT,
+                            theme::accent(),
                         );
                         ui.vertical(|ui| {
                             if self.is_attached() {
@@ -353,18 +354,18 @@ impl ZeroApp {
                                         self.attached_pid.unwrap_or(0)
                                     ))
                                     .size(10.5)
-                                    .color(theme::FAINT),
+                                    .color(theme::faint()),
                                 );
                             } else {
                                 ui.label(
                                     egui::RichText::new("还没有连接进程")
                                         .size(12.0)
-                                        .color(theme::MUTED),
+                                        .color(theme::muted()),
                                 );
                                 ui.label(
                                     egui::RichText::new("点击上方进程卡片")
                                         .size(10.5)
-                                        .color(theme::FAINT),
+                                        .color(theme::faint()),
                                 );
                             }
                         });
@@ -375,32 +376,32 @@ impl ZeroApp {
                 if remaining > 128.0 {
                     ui.add_space(remaining - 128.0);
                 }
-                theme::card().show(ui, |ui| {
+                theme::card_frame().show(ui, |ui| {
                     ui.set_width(ui.available_width());
                     ui.horizontal(|ui| {
                         let (rect, _) = ui.allocate_exact_size(Vec2::splat(26.0), Sense::hover());
                         ui.painter()
-                            .circle_filled(rect.center(), 12.0, theme::ACCENT_2.gamma_multiply(0.12));
-                        theme::paint_icon(ui.painter(), rect.shrink(7.0), IconKind::Lock, theme::ACCENT_2);
+                            .circle_filled(rect.center(), 12.0, theme::accent_2().gamma_multiply(0.12));
+                        theme::paint_icon(ui.painter(), rect.shrink(7.0), IconKind::Lock, theme::accent_2());
                         ui.label(
                             egui::RichText::new("本地 · 离线")
                                 .size(12.0)
                                 .strong()
-                                .color(theme::TEXT),
+                                .color(theme::text()),
                         );
                     });
                     ui.add_space(3.0);
                     ui.label(
                         egui::RichText::new("所有扫描都在本机完成，不上传内容，也不注入目标进程。")
                             .size(10.5)
-                            .color(theme::MUTED),
+                            .color(theme::muted()),
                     );
                 });
                 ui.add_space(6.0);
                 ui.label(
-                    egui::RichText::new("v0.1 · 独立重制版")
+                    egui::RichText::new(format!("v{} · 独立重制版", crate::update::VERSION))
                         .size(10.0)
-                        .color(theme::FAINT),
+                        .color(theme::faint()),
                 );
             });
     }
@@ -417,19 +418,19 @@ impl ZeroApp {
         let (rect, response) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 42.0), Sense::click());
         let painter = ui.painter();
         if selected {
-            painter.rect_filled(rect, Rounding::same(10.0), theme::ACCENT.gamma_multiply(0.13));
+            painter.rect_filled(rect, Rounding::same(10.0), theme::accent().gamma_multiply(0.13));
             painter.rect_filled(
                 egui::Rect::from_min_size(
                     rect.left_center() + Vec2::new(0.0, -12.0),
                     Vec2::new(3.0, 24.0),
                 ),
                 Rounding::same(2.0),
-                theme::ACCENT,
+                theme::accent(),
             );
         } else if response.hovered() {
             painter.rect_filled(rect, Rounding::same(10.0), Color32::from_white_alpha(5));
         }
-        let color = if selected { theme::ACCENT } else { theme::MUTED };
+        let color = if selected { theme::accent() } else { theme::muted() };
         theme::paint_icon(
             painter,
             egui::Rect::from_center_size(
@@ -444,7 +445,7 @@ impl ZeroApp {
             Align2::LEFT_CENTER,
             label,
             FontId::proportional(13.5),
-            if selected { theme::TEXT } else { theme::MUTED },
+            if selected { theme::text() } else { theme::muted() },
         );
         if let Some(badge) = badge {
             if badge != "0" {
@@ -453,7 +454,7 @@ impl ZeroApp {
                     Align2::RIGHT_CENTER,
                     badge,
                     FontId::proportional(10.5),
-                    if selected { theme::ACCENT } else { theme::FAINT },
+                    if selected { theme::accent() } else { theme::faint() },
                 );
             }
         }
@@ -474,9 +475,9 @@ impl ZeroApp {
             .exact_height(30.0)
             .frame(
                 Frame::none()
-                    .fill(theme::PANEL)
+                    .fill(theme::panel())
                     .inner_margin(Margin::symmetric(18.0, 6.0))
-                    .stroke(Stroke::new(1.0, theme::BORDER_SOFT)),
+                    .stroke(Stroke::new(1.0, theme::border_soft())),
             )
             .show(ctx, |ui| {
                 ui.horizontal(|ui| {
@@ -484,11 +485,11 @@ impl ZeroApp {
                         || self.ptr_phase == ScanPhase::Running
                         || self.aob_phase == ScanPhase::Running;
                     let color = if running {
-                        theme::WARN
+                        theme::warn()
                     } else if self.is_attached() {
-                        theme::SUCCESS
+                        theme::success()
                     } else {
-                        theme::FAINT
+                        theme::faint()
                     };
                     ui.painter().circle_filled(
                         ui.cursor().left_center() + Vec2::new(4.0, 0.0),
@@ -507,17 +508,17 @@ impl ZeroApp {
                     } else {
                         "就绪 · 选择一个进程开始".to_string()
                     };
-                    ui.label(egui::RichText::new(status).size(11.0).color(theme::MUTED));
+                    ui.label(egui::RichText::new(status).size(11.0).color(theme::muted()));
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         ui.label(
                             egui::RichText::new("单机 / 离线 · 无注入")
                                 .size(10.5)
-                                .color(theme::FAINT),
+                                .color(theme::faint()),
                         );
                         ui.label(
-                            egui::RichText::new("扫描引擎 v0.1")
+                            egui::RichText::new(format!("扫描引擎 v{}", crate::update::VERSION))
                                 .size(10.5)
-                                .color(theme::FAINT),
+                                .color(theme::faint()),
                         );
                     });
                 });
@@ -531,7 +532,7 @@ impl ZeroApp {
                 ui.label(
                     egui::RichText::new("从一个你看到的数值开始，Zero 会帮你一步步缩小范围。")
                         .size(12.5)
-                        .color(theme::MUTED),
+                        .color(theme::muted()),
                 );
             });
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
@@ -542,9 +543,9 @@ impl ZeroApp {
                     ui,
                     &format!("{} 个候选", self.hits.len()),
                     if self.hits.is_empty() {
-                        theme::FAINT
+                        theme::faint()
                     } else {
-                        theme::ACCENT_2
+                        theme::accent_2()
                     },
                 );
             });
@@ -579,17 +580,17 @@ impl ZeroApp {
         let mut preset: Option<Preset> = None;
         let running = self.scan_phase == ScanPhase::Running;
 
-        theme::card().show(ui, |ui| {
+        theme::card_frame().show(ui, |ui| {
             ui.horizontal(|ui| {
                 theme::section_label(ui, "目标数值");
                 ui.add_space(4.0);
                 ui.label(
                     egui::RichText::new("在游戏里看到的当前值")
                         .size(10.5)
-                        .color(theme::FAINT),
+                        .color(theme::faint()),
                 );
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    theme::tag(ui, "LOCAL", theme::ACCENT_2);
+                    theme::tag(ui, "LOCAL", theme::accent_2());
                 });
             });
             ui.add_space(2.0);
@@ -597,7 +598,7 @@ impl ZeroApp {
                 .fill(Color32::from_rgb(10, 15, 25))
                 .stroke(Stroke::new(
                     1.2,
-                    if running { theme::WARN } else { theme::ACCENT.gamma_multiply(0.65) },
+                    if running { theme::warn() } else { theme::accent().gamma_multiply(0.65) },
                 ))
                 .rounding(Rounding::same(13.0))
                 .inner_margin(Margin::symmetric(14.0, 8.0))
@@ -609,7 +610,7 @@ impl ZeroApp {
                             ui.painter(),
                             icon_rect.shrink(2.0),
                             IconKind::Scan,
-                            theme::ACCENT,
+                            theme::accent(),
                         );
                         let response = ui.add_sized(
                             [ui.available_width() - 4.0, 34.0],
@@ -629,7 +630,7 @@ impl ZeroApp {
 
             ui.add_space(6.0);
             ui.horizontal_wrapped(|ui| {
-                ui.label(egui::RichText::new("试试").size(11.0).color(theme::FAINT));
+                ui.label(egui::RichText::new("试试").size(11.0).color(theme::faint()));
                 for p in smart::PRESETS {
                     if theme::pill(ui, p.label, false).clicked() {
                         preset = Some(p);
@@ -645,7 +646,7 @@ impl ZeroApp {
                 ui.label(
                     egui::RichText::new("数值类型")
                         .size(11.0)
-                        .color(theme::FAINT),
+                        .color(theme::faint()),
                 );
                 for ty in VType::SELECTABLE {
                     if type_pill(ui, ty, self.vtype == ty).clicked() {
@@ -660,7 +661,7 @@ impl ZeroApp {
                     ui.label(
                         egui::RichText::new("首次扫描")
                             .size(11.0)
-                            .color(theme::FAINT),
+                            .color(theme::faint()),
                     );
                     for st in ScanType::PRIMARY {
                         if theme::pill(ui, st.label(), self.scan_type == st).clicked() {
@@ -673,7 +674,7 @@ impl ZeroApp {
                     ui.label(
                         egui::RichText::new("数值如何变化")
                             .size(11.0)
-                            .color(theme::FAINT),
+                            .color(theme::faint()),
                     );
                     for st in ScanType::RELATIVE {
                         if theme::pill(ui, st.label(), self.scan_type == st).clicked() {
@@ -692,7 +693,7 @@ impl ZeroApp {
             }
             if self.scan_type.needs_two() {
                 ui.horizontal(|ui| {
-                    ui.label(egui::RichText::new("范围下限 / 上限").size(11.0).color(theme::FAINT));
+                    ui.label(egui::RichText::new("范围下限 / 上限").size(11.0).color(theme::faint()));
                     ui.add_sized(
                         [130.0, 28.0],
                         egui::TextEdit::singleline(&mut self.scan_value)
@@ -726,7 +727,7 @@ impl ZeroApp {
                             )
                         ))
                         .size(11.0)
-                        .color(theme::MUTED),
+                        .color(theme::muted()),
                     );
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         if theme::outline_button(ui, "停止扫描", true).clicked() {
@@ -774,7 +775,7 @@ impl ZeroApp {
                                 "等待连接"
                             })
                             .size(10.5)
-                            .color(theme::FAINT),
+                            .color(theme::faint()),
                         );
                     });
                 });
@@ -782,16 +783,16 @@ impl ZeroApp {
             ui.add_space(6.0);
             ui.horizontal(|ui| {
                 let (rect, _) = ui.allocate_exact_size(Vec2::splat(14.0), Sense::hover());
-                theme::paint_icon(ui.painter(), rect.shrink(2.0), IconKind::Assistant, theme::ACCENT_2);
+                theme::paint_icon(ui.painter(), rect.shrink(2.0), IconKind::Assistant, theme::accent_2());
                 ui.label(
                     egui::RichText::new(self.scan_hint())
                         .size(11.0)
-                        .color(theme::MUTED),
+                        .color(theme::muted()),
                 );
             });
             if let Some(error) = &self.scan_error {
                 ui.add_space(3.0);
-                ui.label(egui::RichText::new(error).size(11.0).color(theme::DANGER));
+                ui.label(egui::RichText::new(error).size(11.0).color(theme::danger()));
             }
         });
 
@@ -820,13 +821,13 @@ impl ZeroApp {
     }
 
     fn assistant_side(&mut self, ui: &mut egui::Ui) {
-        theme::card().show(ui, |ui| {
+        theme::card_frame().show(ui, |ui| {
             ui.horizontal(|ui| {
                 let (rect, _) = ui.allocate_exact_size(Vec2::splat(20.0), Sense::hover());
-                theme::paint_icon(ui.painter(), rect.shrink(2.0), IconKind::Assistant, theme::ACCENT_2);
+                theme::paint_icon(ui.painter(), rect.shrink(2.0), IconKind::Assistant, theme::accent_2());
                 ui.label(egui::RichText::new("智能建议").size(14.5).strong());
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    theme::tag(ui, "本机推理", theme::ACCENT_2);
+                    theme::tag(ui, "本机推理", theme::accent_2());
                 });
             });
             ui.add_space(6.0);
@@ -858,7 +859,7 @@ impl ZeroApp {
             } else {
                 format!("还有 {} 个候选。再改变一次数值并再次扫描。", self.hits.len())
             };
-            ui.label(egui::RichText::new(live).size(11.5).color(theme::MUTED));
+            ui.label(egui::RichText::new(live).size(11.5).color(theme::muted()));
 
             // Triage summary: the numbers that answer "should I keep reading
             // this list, or is it already narrowed enough".
@@ -875,10 +876,10 @@ impl ZeroApp {
                     .filter(|c| c.score < 15)
                     .count();
                 ui.horizontal(|ui| {
-                    theme::tag(ui, &format!("{strong} 个很可能"), theme::ACCENT_2);
-                    theme::tag(ui, &format!("最高 {top} 分"), theme::ACCENT);
+                    theme::tag(ui, &format!("{strong} 个很可能"), theme::accent_2());
+                    theme::tag(ui, &format!("最高 {top} 分"), theme::accent());
                     if weak > 0 {
-                        theme::tag(ui, &format!("{weak} 个可忽略"), theme::FAINT);
+                        theme::tag(ui, &format!("{weak} 个可忽略"), theme::faint());
                     }
                 });
                 if !self.feedback.is_empty() {
@@ -889,7 +890,7 @@ impl ZeroApp {
                             self.feedback.len()
                         ))
                         .size(10.5)
-                        .color(theme::SUCCESS),
+                        .color(theme::success()),
                     );
                 }
             }
@@ -918,7 +919,7 @@ impl ZeroApp {
                 ui.label(
                     egui::RichText::new(if ok { "上次验证：全部通过" } else { "上次验证：有失败项" })
                         .size(10.5)
-                        .color(if ok { theme::SUCCESS } else { theme::DANGER }),
+                        .color(if ok { theme::success() } else { theme::danger() }),
                 );
             }
         });
@@ -932,29 +933,29 @@ impl ZeroApp {
         let mut reject_index: Option<usize> = None;
         let hits_len = self.hits.len();
 
-        theme::card().show(ui, |ui| {
+        theme::card_frame().show(ui, |ui| {
             ui.horizontal(|ui| {
                 ui.label(egui::RichText::new("扫描结果").size(15.0).strong());
-                theme::tag(ui, &format!("{hits_len}"), if hits_len > 0 { theme::ACCENT_2 } else { theme::FAINT });
+                theme::tag(ui, &format!("{hits_len}"), if hits_len > 0 { theme::accent_2() } else { theme::faint() });
                 if !self.last_scan_kind.is_empty() {
                     ui.label(
                         egui::RichText::new(&self.last_scan_kind)
                             .size(10.5)
-                            .color(theme::FAINT),
+                            .color(theme::faint()),
                     );
                 }
                 if self.scan_truncated {
-                    theme::tag(ui, "已达上限", theme::WARN);
+                    theme::tag(ui, "已达上限", theme::warn());
                 }
                 if !self.ranked.is_empty() {
                     let strong = triage::strong_count(&self.ranked);
                     let top = self.ranked.first().map(|c| c.score).unwrap_or(0);
                     if strong > 0 {
-                        theme::tag(ui, &format!("{strong} 个很可能"), theme::ACCENT_2);
+                        theme::tag(ui, &format!("{strong} 个很可能"), theme::accent_2());
                         ui.label(
                             egui::RichText::new(format!("最高 {top} 分 · 按证据排序"))
                                 .size(10.0)
-                                .color(theme::FAINT),
+                                .color(theme::faint()),
                         );
                     }
                 }
@@ -1011,7 +1012,7 @@ impl ZeroApp {
                             ui.allocate_exact_size(Vec2::new(row_width, row_height), Sense::click());
                         if selected {
                             ui.painter()
-                                .rect_filled(rect, Rounding::same(6.0), theme::ACCENT.gamma_multiply(0.10));
+                                .rect_filled(rect, Rounding::same(6.0), theme::accent().gamma_multiply(0.10));
                         } else if response.hovered() {
                             ui.painter()
                                 .rect_filled(rect, Rounding::same(6.0), Color32::from_white_alpha(4));
@@ -1023,11 +1024,11 @@ impl ZeroApp {
                         // "which of these is it" before the user reads addresses.
                         let candidate = self.ranked.iter().find(|c| c.hit.address == hit.address);
                         let (marker, colour) = match candidate.map(|c| c.score) {
-                            Some(score) if score >= 60 => ("●", theme::ACCENT_2),
-                            Some(score) if score >= 35 => ("◐", theme::SUCCESS),
-                            Some(score) if score >= 15 => ("○", theme::WARN),
-                            Some(_) => ("·", theme::FAINT),
-                            None => (" ", theme::FAINT),
+                            Some(score) if score >= 60 => ("●", theme::accent_2()),
+                            Some(score) if score >= 35 => ("◐", theme::success()),
+                            Some(score) if score >= 15 => ("○", theme::warn()),
+                            Some(_) => ("·", theme::faint()),
+                            None => (" ", theme::faint()),
                         };
                         let mark = row_ui.label(
                             egui::RichText::new(marker).size(13.0).color(colour),
@@ -1049,7 +1050,7 @@ impl ZeroApp {
                                 candidate.score
                             ));
                         }
-                        cell_mono(&mut row_ui, 158.0, &format!("0x{:X}", hit.address), theme::ACCENT);
+                        cell_mono(&mut row_ui, 158.0, &format!("0x{:X}", hit.address), theme::accent());
                         cell_tag(&mut row_ui, 56.0, hit.vtype.short(), type_color(hit.vtype));
                         cell_label(&mut row_ui, 118.0, &hit.value.display(), false);
                         cell_label(
@@ -1058,15 +1059,15 @@ impl ZeroApp {
                             &hit.previous.as_ref().map(|v| v.display()).unwrap_or_else(|| "—".to_string()),
                             true,
                         );
-                        if cell_button(&mut row_ui, 58.0, "+ 添加", theme::ACCENT_2).clicked() {
+                        if cell_button(&mut row_ui, 58.0, "+ 添加", theme::accent_2()).clicked() {
                             add_index = Some(i);
                         }
-                        if cell_button(&mut row_ui, 45.0, "内存", theme::MUTED).clicked() {
+                        if cell_button(&mut row_ui, 45.0, "内存", theme::muted()).clicked() {
                             browse = Some(hit.address);
                         }
                         // Negative feedback: the one signal a scanner cannot
                         // derive on its own is "no, that is not it".
-                        if cell_button(&mut row_ui, 52.0, "不是它", theme::DANGER).clicked() {
+                        if cell_button(&mut row_ui, 52.0, "不是它", theme::danger()).clicked() {
                             reject_index = Some(i);
                         }
                         if response.clicked() {
@@ -1080,14 +1081,14 @@ impl ZeroApp {
                 ui.label(
                     egui::RichText::new("提示：点击行选中，双击「+ 添加」可把候选放入地址列表。")
                         .size(10.0)
-                        .color(theme::FAINT),
+                        .color(theme::faint()),
                 );
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     if self.scan_truncated {
                         ui.label(
                             egui::RichText::new("结果达到上限，建议让数值变化后再次扫描。")
                                 .size(10.0)
-                                .color(theme::WARN),
+                                .color(theme::warn()),
                         );
                     }
                 });
@@ -1132,7 +1133,7 @@ impl ZeroApp {
                 ui.label(
                     egui::RichText::new("把值得保留的地址钉在这里，随时读取、修改或锁定。")
                         .size(12.5)
-                        .color(theme::MUTED),
+                        .color(theme::muted()),
                 );
             });
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
@@ -1142,19 +1143,19 @@ impl ZeroApp {
                 theme::status_chip(
                     ui,
                     &format!("{count} 个地址"),
-                    if count > 0 { theme::ACCENT_2 } else { theme::FAINT },
+                    if count > 0 { theme::accent_2() } else { theme::faint() },
                 );
             });
         });
         ui.add_space(4.0);
 
-        theme::card().show(ui, |ui| {
+        theme::card_frame().show(ui, |ui| {
             ui.horizontal(|ui| {
                 ui.label(egui::RichText::new("已保存").size(14.5).strong());
                 ui.label(
                     egui::RichText::new("锁定后每 60ms 写回一次")
                         .size(10.5)
-                        .color(theme::FAINT),
+                        .color(theme::faint()),
                 );
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     if theme::outline_button(ui, "全部解锁", count > 0).clicked() && count > 0 {
@@ -1204,7 +1205,7 @@ impl ZeroApp {
                                 toggle = Some((entry.id, active));
                             }
                             cell_label(ui, 150.0, &entry.desc, false);
-                            cell_mono(ui, 158.0, &format!("0x{:X}", entry.address), theme::ACCENT);
+                            cell_mono(ui, 158.0, &format!("0x{:X}", entry.address), theme::accent());
                             cell_tag(ui, 72.0, entry.vtype.short(), type_color(entry.vtype));
                             let current = entry
                                 .current
@@ -1215,7 +1216,7 @@ impl ZeroApp {
                                 ui,
                                 130.0,
                                 &current,
-                                if entry.active { theme::SUCCESS } else { theme::TEXT },
+                                if entry.active { theme::success() } else { theme::text() },
                             )
                             .clicked()
                             {
@@ -1227,13 +1228,13 @@ impl ZeroApp {
                                 .map(|v| v.display())
                                 .unwrap_or_else(|| "—".to_string());
                             cell_label(ui, 130.0, &prev, true);
-                            if cell_button(ui, 36.0, "代码", theme::ACCENT_2).clicked() {
+                            if cell_button(ui, 36.0, "代码", theme::accent_2()).clicked() {
                                 code = Some(entry.address);
                             }
-                            if cell_button(ui, 36.0, "编辑", theme::MUTED).clicked() {
+                            if cell_button(ui, 36.0, "编辑", theme::muted()).clicked() {
                                 edit = Some(entry.id);
                             }
-                            if cell_button(ui, 36.0, "移除", theme::DANGER).clicked() {
+                            if cell_button(ui, 36.0, "移除", theme::danger()).clicked() {
                                 remove = Some(entry.id);
                             }
                         });
@@ -1285,6 +1286,162 @@ impl ZeroApp {
         }
     }
 
+    /// 结构浏览：把某个地址后面的一整块内存按字段拆开，找出它到底是什么。
+    pub fn ui_struct(&mut self, ui: &mut egui::Ui) {
+        let mut dissect = false;
+        let mut goto = false;
+        let mut add_field: Option<usize> = None;
+        let mut goto_field: Option<(u64, bool)> = None;
+
+        ui.horizontal(|ui| {
+            ui.vertical(|ui| {
+                ui.label(egui::RichText::new("结构浏览").size(26.0).strong());
+                ui.label(
+                    egui::RichText::new("读出一块内存并拆成字段，猜测每个偏移是什么：指针、整数、浮点还是文本。")
+                        .size(12.5)
+                        .color(theme::muted()),
+                );
+            });
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                theme::tag(ui, "只读", theme::accent_2());
+            });
+        });
+        ui.add_space(4.0);
+
+        theme::card_frame().show(ui, |ui| {
+            ui.horizontal(|ui| {
+                ui.set_width(ui.available_width());
+                ui.horizontal(|ui| {
+                    ui.vertical(|ui| {
+                        theme::section_label(ui, "地址");
+                        ui.add_sized(
+                            [360.0, 32.0],
+                            egui::TextEdit::singleline(&mut self.struct_addr)
+                                .font(FontId::monospace(13.0))
+                                .hint_text("game.exe+0x4A0C8  或  0x7FF6A1B2C3D4"),
+                        );
+                    });
+                    ui.add_space(8.0);
+                    ui.vertical(|ui| {
+                        theme::section_label(ui, "长度");
+                        ui.horizontal(|ui| {
+                            ui.add(
+                                egui::DragValue::new(&mut self.struct_size)
+                                    .clamp_range(16..=4096)
+                                    .speed(16),
+                            );
+                            ui.label(egui::RichText::new("字节").size(10.5).color(theme::faint()));
+                        });
+                    });
+                    ui.add_space(8.0);
+                    ui.vertical(|ui| {
+                        ui.add_space(12.0);
+                        if theme::gradient_button(ui, "解读结构", 128.0, self.is_attached()).clicked() {
+                            dissect = true;
+                        }
+                    });
+                });
+            });
+            if let Some(error) = &self.struct_error {
+                ui.label(egui::RichText::new(error).size(11.0).color(theme::danger()));
+            }
+        });
+        ui.add_space(8.0);
+
+        match &self.struct_result {
+            None => {
+                if self.struct_loaded && self.struct_error.is_none() {
+                    empty_state(
+                        ui,
+                        IconKind::Structure,
+                        "解读一下看看",
+                        "输入地址（支持 game.exe+0x4A0C8 这种模块偏移），点「解读结构」。",
+                    );
+                } else if !self.struct_loaded {
+                    empty_state(
+                        ui,
+                        IconKind::Structure,
+                        "结构浏览器",
+                        "把地址后面的一块内存拆开，看每个偏移是什么类型。",
+                    );
+                }
+            }
+            Some(result) => {
+                theme::card_frame().show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.label(egui::RichText::new(format!("0x{:X}", result.address)).size(13.0).strong());
+                        if !result.annotation.is_empty() {
+                            ui.label(
+                                egui::RichText::new(format!("({})", result.annotation))
+                                    .size(11.0)
+                                    .color(theme::accent_2()),
+                            );
+                        }
+                        ui.label(
+                            egui::RichText::new(format!(" {} 字节 · {} 个字段", result.size, result.fields.len()))
+                                .size(10.5)
+                                .color(theme::faint()),
+                        );
+                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                            if theme::outline_button(ui, "在内存中查看", self.is_attached()).clicked() {
+                                goto = true;
+                            }
+                        });
+                    });
+                    theme::divider(ui);
+                    ui.horizontal(|ui| {
+                        ui.add_space(4.0);
+                        cell_label(ui, 58.0, "偏移", true);
+                        cell_label(ui, 84.0, "类型", true);
+                        cell_label(ui, 240.0, "值", true);
+                        cell_label(ui, 172.0, "十六进制", true);
+                        cell_label(ui, 220.0, "说明", true);
+                        cell_label(ui, 92.0, "操作", true);
+                    });
+                    theme::divider(ui);
+                    let row_height = 36.0;
+                    let out = egui::ScrollArea::vertical()
+                        .max_height(460.0)
+                        .auto_shrink([false, false])
+                        .show_rows(ui, row_height, result.fields.len(), |ui, range| {
+                            for i in range {
+                                let field = &result.fields[i];
+                                ui.horizontal(|ui| {
+                                    ui.add_space(4.0);
+                                    cell_mono(ui, 58.0, &format!("+0x{:X}", field.offset), theme::muted());
+                                    cell_tag(ui, 84.0, field.kind.label(), type_color(field.kind.vtype().unwrap_or(VType::Auto)));
+                                    cell_mono(ui, 240.0, &field.value_text(), theme::text());
+                                    cell_mono(ui, 172.0, &field.hex(), theme::faint());
+                                    cell_label(ui, 220.0, &field.summary(), true);
+                                    if cell_button(ui, 40.0, "加入列表", theme::accent_2()).clicked() {
+                                        add_field = Some(i);
+                                    }
+                                    if cell_button(ui, 40.0, "跳转", theme::accent()).clicked() {
+                                        goto_field = Some((result.address.saturating_add(field.offset as u64), true));
+                                    }
+                                });
+                                theme::divider(ui);
+                            }
+                        });
+                });
+            }
+        }
+        if dissect {
+            self.struct_dissect();
+        }
+        if goto {
+            if let Some(result) = &self.struct_result {
+                self.goto_memory(result.address);
+            }
+        }
+        if let Some(index) = add_field {
+            self.add_struct_field_to_list(index);
+        }
+        if let Some((address, _)) = goto_field {
+            self.goto_memory(address);
+        }
+    }
+
     pub fn ui_memory(&mut self, ui: &mut egui::Ui) {
         let mut read = false;
         let mut prev = false;
@@ -1297,22 +1454,22 @@ impl ZeroApp {
                 ui.label(
                     egui::RichText::new("以十六进制查看目标进程的内存，谨慎写入。")
                         .size(12.5)
-                        .color(theme::MUTED),
+                        .color(theme::muted()),
                 );
             });
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 if self.is_attached() {
-                    theme::status_chip(ui, "已连接", theme::SUCCESS);
+                    theme::status_chip(ui, "已连接", theme::success());
                 } else {
-                    theme::status_chip(ui, "未连接", theme::FAINT);
+                    theme::status_chip(ui, "未连接", theme::faint());
                 }
             });
         });
         ui.add_space(4.0);
 
-        theme::card().show(ui, |ui| {
+        theme::card_frame().show(ui, |ui| {
             ui.horizontal(|ui| {
-                ui.label(egui::RichText::new("地址").size(11.0).color(theme::FAINT));
+                ui.label(egui::RichText::new("地址").size(11.0).color(theme::faint()));
                 ui.add_sized(
                     [260.0, 32.0],
                     egui::TextEdit::singleline(&mut self.mem_addr)
@@ -1341,13 +1498,13 @@ impl ZeroApp {
                 }
             });
             if let Some(error) = &self.mem_error {
-                ui.label(egui::RichText::new(error).size(11.0).color(theme::DANGER));
+                ui.label(egui::RichText::new(error).size(11.0).color(theme::danger()));
             }
         });
 
         ui.add_space(12.0);
         if !self.is_attached() {
-            theme::card().show(ui, |ui| {
+            theme::card_frame().show(ui, |ui| {
                 empty_state(
                     ui,
                     IconKind::Memory,
@@ -1358,7 +1515,7 @@ impl ZeroApp {
             return;
         }
         if self.mem_data.is_empty() {
-            theme::card().show(ui, |ui| {
+            theme::card_frame().show(ui, |ui| {
                 empty_state(
                     ui,
                     IconKind::Memory,
@@ -1369,22 +1526,22 @@ impl ZeroApp {
             return;
         }
 
-        theme::card().show(ui, |ui| {
+        theme::card_frame().show(ui, |ui| {
             ui.horizontal(|ui| {
-                ui.label(egui::RichText::new("内存区域").size(12.0).color(theme::FAINT));
+                ui.label(egui::RichText::new("内存区域").size(12.0).color(theme::faint()));
                 if let Some(handle) = &self.process {
                     if let Some(region) = handle.region_at(self.mem_base) {
-                        theme::tag(ui, &format!("{:X}", region.base), theme::ACCENT);
-                        theme::tag(ui, &format!("{:.1} KB", region.size as f64 / 1024.0), theme::MUTED);
+                        theme::tag(ui, &format!("{:X}", region.base), theme::accent());
+                        theme::tag(ui, &format!("{:.1} KB", region.size as f64 / 1024.0), theme::muted());
                         theme::tag(
                             ui,
                             if region.writable { "可写" } else { "只读" },
-                            if region.writable { theme::SUCCESS } else { theme::WARN },
+                            if region.writable { theme::success() } else { theme::warn() },
                         );
                         ui.label(
                             egui::RichText::new(handle.protection_at(self.mem_base))
                                 .size(10.5)
-                                .color(theme::FAINT),
+                                .color(theme::faint()),
                         );
                     }
                 }
@@ -1392,7 +1549,7 @@ impl ZeroApp {
                     ui.label(
                         egui::RichText::new(format!("基址 0x{:X}", self.mem_base))
                             .size(10.5)
-                            .color(theme::FAINT),
+                            .color(theme::faint()),
                     );
                 });
             });
@@ -1403,21 +1560,21 @@ impl ZeroApp {
                 ui.label(
                     egui::RichText::new("地址")
                         .size(10.5)
-                        .color(theme::FAINT)
+                        .color(theme::faint())
                         .monospace(),
                 );
                 ui.add_space(72.0);
                 ui.label(
                     egui::RichText::new("00 01 02 03 04 05 06 07  08 09 0A 0B 0C 0D 0E 0F")
                         .size(10.5)
-                        .color(theme::FAINT)
+                        .color(theme::faint())
                         .monospace(),
                 );
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     ui.label(
                         egui::RichText::new("ASCII")
                             .size(10.5)
-                            .color(theme::FAINT)
+                            .color(theme::faint())
                             .monospace(),
                     );
                 });
@@ -1431,7 +1588,7 @@ impl ZeroApp {
                     ui.label(
                         egui::RichText::new(format!("{:016X}", self.mem_base + start as u64))
                             .size(12.0)
-                            .color(theme::ACCENT)
+                            .color(theme::accent())
                             .monospace(),
                     );
                     ui.add_space(14.0);
@@ -1447,7 +1604,7 @@ impl ZeroApp {
                     ui.label(
                         egui::RichText::new(hex)
                             .size(12.0)
-                            .color(theme::TEXT)
+                            .color(theme::text())
                             .monospace(),
                     );
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
@@ -1464,7 +1621,7 @@ impl ZeroApp {
                         ui.label(
                             egui::RichText::new(ascii)
                                 .size(12.0)
-                                .color(theme::MUTED)
+                                .color(theme::muted())
                                 .monospace(),
                         );
                     });
@@ -1473,14 +1630,14 @@ impl ZeroApp {
         });
 
         ui.add_space(12.0);
-        theme::card().show(ui, |ui| {
+        theme::card_frame().show(ui, |ui| {
             ui.horizontal(|ui| {
                 ui.vertical(|ui| {
                     ui.label(egui::RichText::new("写入字节").size(13.0).strong());
                     ui.label(
                         egui::RichText::new("十六进制，例如 90 90 90；写入会立即生效。")
                             .size(10.5)
-                            .color(theme::FAINT),
+                            .color(theme::faint()),
                     );
                 });
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
@@ -1526,11 +1683,11 @@ impl ZeroApp {
                 ui.label(
                     egui::RichText::new("用一句话描述你要找的数值。所有推断都在本机完成。")
                         .size(12.5)
-                        .color(theme::MUTED),
+                        .color(theme::muted()),
                 );
             });
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                theme::tag(ui, "LOCAL AI", theme::ACCENT_2);
+                theme::tag(ui, "LOCAL AI", theme::accent_2());
             });
         });
         ui.add_space(4.0);
@@ -1551,15 +1708,15 @@ impl ZeroApp {
             ui.vertical(|ui| {
                 ui.set_width(left_w);
                 ui.set_max_width(left_w);
-                theme::card().show(ui, |ui| {
+                theme::card_frame().show(ui, |ui| {
                     ui.set_max_width(left_w - 24.0);
                     ui.set_height(410.0);
                     ui.horizontal(|ui| {
                         let (rect, _) = ui.allocate_exact_size(Vec2::splat(20.0), Sense::hover());
-                        theme::paint_icon(ui.painter(), rect.shrink(2.0), IconKind::Assistant, theme::ACCENT_2);
+                        theme::paint_icon(ui.painter(), rect.shrink(2.0), IconKind::Assistant, theme::accent_2());
                         ui.label(egui::RichText::new("对话").size(14.0).strong());
                         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                            theme::tag(ui, "不会联网", theme::SUCCESS);
+                            theme::tag(ui, "不会联网", theme::success());
                         });
                     });
                     ui.add_space(4.0);
@@ -1573,7 +1730,7 @@ impl ZeroApp {
                                 if msg.from_user {
                                     ui.with_layout(Layout::right_to_left(Align::Min), |ui| {
                                         Frame::none()
-                                            .fill(theme::ACCENT.gamma_multiply(0.24))
+                                            .fill(theme::accent().gamma_multiply(0.24))
                                             .rounding(Rounding::same(12.0))
                                             .inner_margin(Margin::symmetric(12.0, 8.0))
                                             .show(ui, |ui| {
@@ -1581,15 +1738,15 @@ impl ZeroApp {
                                                 ui.label(
                                                     egui::RichText::new(&msg.text)
                                                         .size(12.5)
-                                                        .color(theme::TEXT),
+                                                        .color(theme::text()),
                                                 );
                                             });
                                     });
                                 } else {
                                     ui.with_layout(Layout::left_to_right(Align::Min), |ui| {
                                         Frame::none()
-                                            .fill(theme::CARD_SOFT)
-                                            .stroke(Stroke::new(1.0, theme::BORDER_SOFT))
+                                            .fill(theme::card_soft())
+                                            .stroke(Stroke::new(1.0, theme::border_soft()))
                                             .rounding(Rounding::same(12.0))
                                             .inner_margin(Margin::symmetric(12.0, 8.0))
                                             .show(ui, |ui| {
@@ -1597,7 +1754,7 @@ impl ZeroApp {
                                                 ui.label(
                                                     egui::RichText::new(&msg.text)
                                                         .size(12.5)
-                                                        .color(theme::MUTED),
+                                                        .color(theme::muted()),
                                                 );
                                             });
                                     });
@@ -1618,7 +1775,7 @@ impl ZeroApp {
                         }
                     });
                     ui.horizontal_wrapped(|ui| {
-                        ui.label(egui::RichText::new("快捷").size(10.5).color(theme::FAINT));
+                        ui.label(egui::RichText::new("快捷").size(10.5).color(theme::faint()));
                         for p in smart::PRESETS {
                             if theme::pill(ui, p.label, false).clicked() {
                                 preset = Some(p);
@@ -1647,12 +1804,12 @@ impl ZeroApp {
     }
 
     fn assistant_plan_panel(&mut self, ui: &mut egui::Ui, apply: &mut bool) {
-        theme::card().show(ui, |ui| {
+        theme::card_frame().show(ui, |ui| {
             ui.horizontal(|ui| {
                 ui.label(egui::RichText::new("识别结果").size(14.0).strong());
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     if let Some(plan) = &self.assistant_plan {
-                        theme::tag(ui, &format!("{}%", plan.confidence), theme::ACCENT_2);
+                        theme::tag(ui, &format!("{}%", plan.confidence), theme::accent_2());
                     }
                 });
             });
@@ -1662,23 +1819,23 @@ impl ZeroApp {
                     egui::RichText::new(&plan.title)
                         .size(18.0)
                         .strong()
-                        .color(theme::TEXT),
+                        .color(theme::text()),
                 );
-                ui.label(egui::RichText::new(&plan.reason).size(11.5).color(theme::MUTED));
+                ui.label(egui::RichText::new(&plan.reason).size(11.5).color(theme::muted()));
                 ui.add_space(8.0);
                 theme::soft_card().show(ui, |ui| {
                     ui.horizontal(|ui| {
-                        ui.label(egui::RichText::new("类型").size(10.5).color(theme::FAINT));
-                        theme::tag(ui, plan.vtype.label(), theme::ACCENT);
-                        ui.label(egui::RichText::new("方式").size(10.5).color(theme::FAINT));
-                        theme::tag(ui, plan.scan_type.label(), theme::ACCENT_2);
+                        ui.label(egui::RichText::new("类型").size(10.5).color(theme::faint()));
+                        theme::tag(ui, plan.vtype.label(), theme::accent());
+                        ui.label(egui::RichText::new("方式").size(10.5).color(theme::faint()));
+                        theme::tag(ui, plan.scan_type.label(), theme::accent_2());
                     });
                     if !plan.value.is_empty() {
                         ui.label(
                             egui::RichText::new(format!("数值  {}", plan.value))
                                 .size(20.0)
                                 .monospace()
-                                .color(theme::TEXT),
+                                .color(theme::text()),
                         );
                     }
                 });
@@ -1702,16 +1859,16 @@ impl ZeroApp {
         });
 
         ui.add_space(12.0);
-        theme::card().show(ui, |ui| {
+        theme::card_frame().show(ui, |ui| {
             ui.label(egui::RichText::new("常用目标").size(13.0).strong());
             ui.add_space(4.0);
             for p in smart::PRESETS {
                 ui.horizontal(|ui| {
                     let (rect, _) = ui.allocate_exact_size(Vec2::splat(18.0), Sense::hover());
-                    theme::paint_icon(ui.painter(), rect.shrink(2.0), IconKind::Practice, theme::ACCENT_2);
+                    theme::paint_icon(ui.painter(), rect.shrink(2.0), IconKind::Practice, theme::accent_2());
                     ui.vertical(|ui| {
                         ui.label(egui::RichText::new(p.label).size(12.0).strong());
-                        ui.label(egui::RichText::new(p.hint).size(10.0).color(theme::FAINT));
+                        ui.label(egui::RichText::new(p.hint).size(10.0).color(theme::faint()));
                     });
                 });
             }
@@ -1719,7 +1876,7 @@ impl ZeroApp {
             ui.label(
                 egui::RichText::new("这里的“智能”是本地规则推理：不调用云端模型，也不读取聊天以外的内容。")
                     .size(10.0)
-                    .color(theme::FAINT),
+                    .color(theme::faint()),
             );
         });
     }
@@ -1731,13 +1888,13 @@ impl ZeroApp {
                 ui.label(
                     egui::RichText::new("没有游戏可试？用一个安全的小程序把扫描流程走一遍。")
                         .size(12.5)
-                        .color(theme::MUTED),
+                        .color(theme::muted()),
                 );
             });
         });
         ui.add_space(4.0);
 
-        theme::card().show(ui, |ui| {
+        theme::card_frame().show(ui, |ui| {
             ui.horizontal_top(|ui| {
                 let (rect, _) = ui.allocate_exact_size(Vec2::new(210.0, 210.0), Sense::hover());
                 theme::paint_gradient_rect(
@@ -1749,25 +1906,25 @@ impl ZeroApp {
                 );
                 for (i, alpha) in [(70.0, 30u8), (46.0, 42), (24.0, 80)] {
                     ui.painter()
-                        .circle_stroke(rect.center(), i, Stroke::new(1.0, theme::ACCENT_2.gamma_multiply(alpha as f32 / 255.0)));
+                        .circle_stroke(rect.center(), i, Stroke::new(1.0, theme::accent_2().gamma_multiply(alpha as f32 / 255.0)));
                 }
                 ui.painter()
-                    .circle_filled(rect.center(), 5.0, theme::ACCENT_2);
+                    .circle_filled(rect.center(), 5.0, theme::accent_2());
                 ui.painter().line_segment(
                     [rect.center() + Vec2::new(-84.0, 0.0), rect.center() + Vec2::new(-16.0, 0.0)],
-                    Stroke::new(1.0, theme::ACCENT_2.gamma_multiply(0.6)),
+                    Stroke::new(1.0, theme::accent_2().gamma_multiply(0.6)),
                 );
                 ui.painter().line_segment(
                     [rect.center() + Vec2::new(16.0, 0.0), rect.center() + Vec2::new(84.0, 0.0)],
-                    Stroke::new(1.0, theme::ACCENT_2.gamma_multiply(0.6)),
+                    Stroke::new(1.0, theme::accent_2().gamma_multiply(0.6)),
                 );
                 ui.painter().line_segment(
                     [rect.center() + Vec2::new(0.0, -84.0), rect.center() + Vec2::new(0.0, -16.0)],
-                    Stroke::new(1.0, theme::ACCENT_2.gamma_multiply(0.6)),
+                    Stroke::new(1.0, theme::accent_2().gamma_multiply(0.6)),
                 );
                 ui.painter().line_segment(
                     [rect.center() + Vec2::new(0.0, 16.0), rect.center() + Vec2::new(0.0, 84.0)],
-                    Stroke::new(1.0, theme::ACCENT_2.gamma_multiply(0.6)),
+                    Stroke::new(1.0, theme::accent_2().gamma_multiply(0.6)),
                 );
 
                 ui.add_space(18.0);
@@ -1778,7 +1935,7 @@ impl ZeroApp {
                             "靶场是一个独立的小窗口，里面有生命、弹药、金币和浮点护甲。点按钮改变它们，再回到 Zero 扫描。",
                         )
                         .size(12.0)
-                        .color(theme::MUTED),
+                        .color(theme::muted()),
                     );
                     ui.add_space(10.0);
                     ui.horizontal(|ui| {
@@ -1794,9 +1951,9 @@ impl ZeroApp {
                                 ui,
                                 &format!("PID {pid}"),
                                 if self.attached_pid == Some(pid) {
-                                    theme::SUCCESS
+                                    theme::success()
                                 } else {
-                                    theme::WARN
+                                    theme::warn()
                                 },
                             );
                         }
@@ -1810,13 +1967,13 @@ impl ZeroApp {
                                 "靶场正在启动或等待连接。"
                             })
                             .size(10.5)
-                            .color(if self.attached_pid == Some(pid) { theme::SUCCESS } else { theme::WARN }),
+                            .color(if self.attached_pid == Some(pid) { theme::success() } else { theme::warn() }),
                         );
                     } else {
                         ui.label(
                             egui::RichText::new("靶场会以独立进程运行，不会影响其他程序。")
                                 .size(10.5)
-                                .color(theme::FAINT),
+                                .color(theme::faint()),
                         );
                     }
                 });
@@ -1840,18 +1997,18 @@ impl ZeroApp {
                         ui.horizontal(|ui| {
                             let (rect, _) = ui.allocate_exact_size(Vec2::splat(22.0), Sense::hover());
                             ui.painter()
-                                .circle_filled(rect.center(), 11.0, theme::ACCENT.gamma_multiply(0.16));
+                                .circle_filled(rect.center(), 11.0, theme::accent().gamma_multiply(0.16));
                             ui.painter().text(
                                 rect.center(),
                                 Align2::CENTER_CENTER,
                                 (i + 1).to_string(),
                                 FontId::proportional(11.0),
-                                theme::ACCENT,
+                                theme::accent(),
                             );
                             ui.label(egui::RichText::new(*title).size(12.5).strong());
                         });
                         ui.add_space(4.0);
-                        ui.label(egui::RichText::new(*body).size(10.5).color(theme::MUTED));
+                        ui.label(egui::RichText::new(*body).size(10.5).color(theme::muted()));
                     });
                 });
                 if i < steps.len() - 1 {
@@ -1870,20 +2027,20 @@ impl ZeroApp {
                 ui.label(
                     egui::RichText::new("给一个内存地址，反推它的稳定指针链：模块基址 + 若干偏移。")
                         .size(12.5)
-                        .color(theme::MUTED),
+                        .color(theme::muted()),
                 );
             });
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 theme::status_chip(
                     ui,
                     &format!("{} 条链", self.ptr_paths.len()),
-                    if self.ptr_paths.is_empty() { theme::FAINT } else { theme::ACCENT_2 },
+                    if self.ptr_paths.is_empty() { theme::faint() } else { theme::accent_2() },
                 );
             });
         });
         ui.add_space(4.0);
 
-        theme::card().show(ui, |ui| {
+        theme::card_frame().show(ui, |ui| {
             ui.set_width(ui.available_width());
             ui.horizontal(|ui| {
                 theme::section_label(ui, "目标地址");
@@ -1929,7 +2086,7 @@ impl ZeroApp {
                         theme::status_chip(
                             ui,
                             &format!("已扫 {} / {}", format_bytes(done), format_bytes(job.total)),
-                            theme::WARN,
+                            theme::warn(),
                         );
                     }
                 }
@@ -1937,7 +2094,7 @@ impl ZeroApp {
         });
         ui.add_space(14.0);
 
-        theme::card().show(ui, |ui| {
+        theme::card_frame().show(ui, |ui| {
             ui.set_width(ui.available_width());
             ui.horizontal(|ui| {
                 theme::section_label(ui, "指针链");
@@ -1956,7 +2113,7 @@ impl ZeroApp {
                 ui.label(
                     egui::RichText::new("还没有结果。先连接进程、输入一个地址，然后开始扫描。")
                         .size(12.0)
-                        .color(theme::FAINT),
+                        .color(theme::faint()),
                 );
                 return;
             }
@@ -1977,8 +2134,8 @@ impl ZeroApp {
                                 );
                                 ui.add_space(3.0);
                                 ui.horizontal(|ui| {
-                                    theme::tag(ui, &format!("{} 层", path.depth()), theme::ACCENT);
-                                    theme::tag(ui, &format!("{:016X}", path.final_address), theme::MUTED);
+                                    theme::tag(ui, &format!("{} 层", path.depth()), theme::accent());
+                                    theme::tag(ui, &format!("{:016X}", path.final_address), theme::muted());
                                 });
                             });
                             ui.with_layout(Layout::right_to_left(Align::Min), |ui| {
@@ -2020,20 +2177,20 @@ impl ZeroApp {
                 ui.label(
                     egui::RichText::new("按一段字节特征码搜索内存，用通配符匹配不确定的字节。")
                         .size(12.5)
-                        .color(theme::MUTED),
+                        .color(theme::muted()),
                 );
             });
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 theme::status_chip(
                     ui,
                     &format!("{} 个匹配", self.aob_hits.len()),
-                    if self.aob_hits.is_empty() { theme::FAINT } else { theme::ACCENT_2 },
+                    if self.aob_hits.is_empty() { theme::faint() } else { theme::accent_2() },
                 );
             });
         });
         ui.add_space(4.0);
 
-        theme::card().show(ui, |ui| {
+        theme::card_frame().show(ui, |ui| {
             ui.set_width(ui.available_width());
             ui.horizontal(|ui| {
                 theme::section_label(ui, "字节特征");
@@ -2065,7 +2222,7 @@ impl ZeroApp {
                         theme::status_chip(
                             ui,
                             &format!("已扫 {} / {}", format_bytes(done), format_bytes(job.total)),
-                            theme::WARN,
+                            theme::warn(),
                         );
                     }
                 }
@@ -2073,7 +2230,7 @@ impl ZeroApp {
         });
         ui.add_space(14.0);
 
-        theme::card().show(ui, |ui| {
+        theme::card_frame().show(ui, |ui| {
             ui.set_width(ui.available_width());
             ui.horizontal(|ui| {
                 theme::section_label(ui, "匹配地址");
@@ -2081,7 +2238,7 @@ impl ZeroApp {
                 ui.label(
                     egui::RichText::new("通配符：?? 匹配一个字节，* / ** / x / xx 同理；至少要有一个确定的字节。")
                         .size(10.5)
-                        .color(theme::FAINT),
+                        .color(theme::faint()),
                 );
             });
             ui.add_space(8.0);
@@ -2089,7 +2246,7 @@ impl ZeroApp {
                 ui.label(
                     egui::RichText::new("还没有匹配。输入一段从反汇编里抄来的特征码，然后开始扫描。")
                         .size(12.0)
-                        .color(theme::FAINT),
+                        .color(theme::faint()),
                 );
                 return;
             }
@@ -2156,7 +2313,7 @@ impl ZeroApp {
                 ui.label(
                     egui::RichText::new("读取模块的 PE 导出表与导入表，把地址还原成函数名。")
                         .size(12.5)
-                        .color(theme::MUTED),
+                        .color(theme::muted()),
                 );
             });
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
@@ -2164,9 +2321,9 @@ impl ZeroApp {
                     ui,
                     &format!("{export_count} 导出 · {import_count} 导入"),
                     if self.sym_table.is_some() {
-                        theme::ACCENT_2
+                        theme::accent_2()
                     } else {
-                        theme::FAINT
+                        theme::faint()
                     },
                 );
             });
@@ -2179,7 +2336,7 @@ impl ZeroApp {
             .map(|m| (m.name.clone(), m.base))
             .collect();
 
-        theme::card().show(ui, |ui| {
+        theme::card_frame().show(ui, |ui| {
             ui.set_width(ui.available_width());
             ui.horizontal(|ui| {
                 theme::section_label(ui, "模块");
@@ -2201,7 +2358,7 @@ impl ZeroApp {
                         ui.label(
                             egui::RichText::new("先连接一个进程。")
                                 .size(12.0)
-                                .color(theme::FAINT),
+                                .color(theme::faint()),
                         );
                     }
                 } else {
@@ -2233,7 +2390,7 @@ impl ZeroApp {
             });
             if let Some(error) = &self.sym_error {
                 ui.add_space(6.0);
-                ui.label(egui::RichText::new(error).size(12.0).color(theme::DANGER));
+                ui.label(egui::RichText::new(error).size(12.0).color(theme::danger()));
             }
             if let Some(table) = &self.sym_table {
                 ui.add_space(6.0);
@@ -2246,7 +2403,7 @@ impl ZeroApp {
                         self.sym_elapsed.as_secs_f64() * 1000.0
                     ))
                     .size(11.0)
-                    .color(theme::FAINT),
+                    .color(theme::faint()),
                 );
             }
         });
@@ -2255,7 +2412,7 @@ impl ZeroApp {
         let mut to_add: Option<(u64, String)> = None;
         let mut to_open: Option<u64> = None;
         let mut to_disasm: Option<u64> = None;
-        theme::card().show(ui, |ui| {
+        theme::card_frame().show(ui, |ui| {
             ui.set_width(ui.available_width());
             ui.horizontal(|ui| {
                 theme::section_label(ui, "符号");
@@ -2275,7 +2432,7 @@ impl ZeroApp {
                 ui.label(
                     egui::RichText::new("选择模块后点「解析符号」，这里会列出它的导出表和导入表。")
                         .size(12.0)
-                        .color(theme::FAINT),
+                        .color(theme::faint()),
                 );
                 return;
             };
@@ -2310,7 +2467,7 @@ impl ZeroApp {
                                 ))
                                 .size(12.0)
                                 .strong()
-                                .color(theme::ACCENT_2)
+                                .color(theme::accent_2())
                                 .font(FontId::monospace(12.0)),
                             );
                             for symbol in symbols {
@@ -2324,7 +2481,7 @@ impl ZeroApp {
                                             ))
                                             .size(11.5)
                                             .font(FontId::monospace(11.5))
-                                            .color(theme::MUTED),
+                                            .color(theme::muted()),
                                         );
                                         ui.label(
                                             egui::RichText::new(&symbol.name)
@@ -2352,7 +2509,7 @@ impl ZeroApp {
                     ui.label(
                         egui::RichText::new("没有匹配的导入符号。")
                             .size(12.0)
-                            .color(theme::FAINT),
+                            .color(theme::faint()),
                     );
                 }
             } else {
@@ -2388,7 +2545,7 @@ impl ZeroApp {
                                                 )
                                             })
                                             .size(11.0)
-                                            .color(theme::FAINT)
+                                            .color(theme::faint())
                                             .font(FontId::monospace(11.0)),
                                         );
                                     });
@@ -2423,7 +2580,7 @@ impl ZeroApp {
                     ui.label(
                         egui::RichText::new("没有匹配的导出符号。")
                             .size(12.0)
-                            .color(theme::FAINT),
+                            .color(theme::faint()),
                     );
                 }
             }
@@ -2451,7 +2608,7 @@ impl ZeroApp {
                 ui.label(
                     egui::RichText::new("把机器码读成指令，看清一段代码在做什么。")
                         .size(12.5)
-                        .color(theme::MUTED),
+                        .color(theme::muted()),
                 );
             });
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
@@ -2459,19 +2616,19 @@ impl ZeroApp {
                     ui,
                     &format!("{} 条指令", self.dis_insns.len()),
                     if self.dis_loaded {
-                        theme::ACCENT_2
+                        theme::accent_2()
                     } else {
-                        theme::FAINT
+                        theme::faint()
                     },
                 );
             });
         });
         ui.add_space(4.0);
 
-        theme::card().show(ui, |ui| {
+        theme::card_frame().show(ui, |ui| {
             ui.set_width(ui.available_width());
             ui.horizontal(|ui| {
-                ui.label(egui::RichText::new("地址").size(11.0).color(theme::FAINT));
+                ui.label(egui::RichText::new("地址").size(11.0).color(theme::faint()));
                 ui.add_sized(
                     [260.0, 32.0],
                     egui::TextEdit::singleline(&mut self.dis_addr)
@@ -2484,7 +2641,7 @@ impl ZeroApp {
             });
             if let Some(error) = &self.dis_error {
                 ui.add_space(4.0);
-                ui.label(egui::RichText::new(error).size(11.0).color(theme::DANGER));
+                ui.label(egui::RichText::new(error).size(11.0).color(theme::danger()));
             }
             if self.dis_loaded {
                 ui.add_space(4.0);
@@ -2495,14 +2652,14 @@ impl ZeroApp {
                         self.dis_bytes.len()
                     ))
                     .size(10.5)
-                    .color(theme::FAINT),
+                    .color(theme::faint()),
                 );
             }
         });
         ui.add_space(14.0);
 
         if !self.is_attached() {
-            theme::card().show(ui, |ui| {
+            theme::card_frame().show(ui, |ui| {
                 empty_state(
                     ui,
                     IconKind::Bolt,
@@ -2513,7 +2670,7 @@ impl ZeroApp {
             return;
         }
         if self.dis_insns.is_empty() {
-            theme::card().show(ui, |ui| {
+            theme::card_frame().show(ui, |ui| {
                 empty_state(
                     ui,
                     IconKind::Bolt,
@@ -2524,7 +2681,7 @@ impl ZeroApp {
             return;
         }
 
-        theme::card().show(ui, |ui| {
+        theme::card_frame().show(ui, |ui| {
             ui.set_width(ui.available_width());
             ui.horizontal(|ui| {
                 theme::section_label(ui, "指令");
@@ -2532,7 +2689,7 @@ impl ZeroApp {
                 ui.label(
                     egui::RichText::new("字节与助记符来自目标进程的实际内存。")
                         .size(10.5)
-                        .color(theme::FAINT),
+                        .color(theme::faint()),
                 );
             });
             ui.add_space(8.0);
@@ -2542,11 +2699,11 @@ impl ZeroApp {
                 .show(ui, |ui| {
                     for insn in &self.dis_insns {
                         let (flow_color, marker) = match &insn.flow {
-                            disasm::Flow::Call(_) => (theme::ACCENT_2, "↳"),
-                            disasm::Flow::Jump(_) => (theme::WARN, "→"),
-                            disasm::Flow::CondJump(_) => (theme::WARN, "?"),
-                            disasm::Flow::Return => (theme::DANGER, "■"),
-                            disasm::Flow::None => (theme::FAINT, " "),
+                            disasm::Flow::Call(_) => (theme::accent_2(), "↳"),
+                            disasm::Flow::Jump(_) => (theme::warn(), "→"),
+                            disasm::Flow::CondJump(_) => (theme::warn(), "?"),
+                            disasm::Flow::Return => (theme::danger(), "■"),
+                            disasm::Flow::None => (theme::faint(), " "),
                         };
                         ui.horizontal(|ui| {
                             ui.label(
@@ -2559,13 +2716,13 @@ impl ZeroApp {
                             ui.label(
                                 egui::RichText::new(format!("{:<24}", insn.hex()))
                                     .size(11.5)
-                                    .color(theme::FAINT)
+                                    .color(theme::faint())
                                     .font(FontId::monospace(11.5)),
                             );
                             ui.label(
                                 egui::RichText::new(&insn.text)
                                     .size(12.5)
-                                    .color(theme::TEXT)
+                                    .color(theme::text())
                                     .font(FontId::monospace(12.5)),
                             );
                             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
@@ -2618,7 +2775,7 @@ impl ZeroApp {
                 ui.label(
                     egui::RichText::new("把字节写进目标进程，随时能原样还原。")
                         .size(12.5)
-                        .color(theme::MUTED),
+                        .color(theme::muted()),
                 );
             });
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
@@ -2626,22 +2783,22 @@ impl ZeroApp {
                     ui,
                     &format!("{} 个生效", active_count),
                     if active_count > 0 {
-                        theme::WARN
+                        theme::warn()
                     } else {
-                        theme::FAINT
+                        theme::faint()
                     },
                 );
             });
         });
         ui.add_space(4.0);
 
-        theme::card().show(ui, |ui| {
+        theme::card_frame().show(ui, |ui| {
             ui.set_width(ui.available_width());
             ui.horizontal(|ui| {
                 ui.label(
                     egui::RichText::new("目标地址")
                         .size(11.0)
-                        .color(theme::FAINT),
+                        .color(theme::faint()),
                 );
                 ui.add_sized(
                     [220.0, 32.0],
@@ -2650,7 +2807,7 @@ impl ZeroApp {
                         .hint_text("0x7FF6..."),
                 );
                 ui.add_space(8.0);
-                ui.label(egui::RichText::new("字节").size(11.0).color(theme::FAINT));
+                ui.label(egui::RichText::new("字节").size(11.0).color(theme::faint()));
                 ui.add_sized(
                     [280.0, 32.0],
                     egui::TextEdit::singleline(&mut self.inj_bytes)
@@ -2674,7 +2831,7 @@ impl ZeroApp {
             });
             if let Some(error) = &self.inj_error {
                 ui.add_space(4.0);
-                ui.label(egui::RichText::new(error).size(11.0).color(theme::DANGER));
+                ui.label(egui::RichText::new(error).size(11.0).color(theme::danger()));
             }
             ui.add_space(6.0);
             ui.label(
@@ -2682,12 +2839,12 @@ impl ZeroApp {
                     "写入前会先读出原始字节，成功后才记录；页面保护写前抬高、写后恢复。",
                 )
                 .size(10.5)
-                .color(theme::FAINT),
+                .color(theme::faint()),
             );
         });
         ui.add_space(14.0);
 
-        theme::card().show(ui, |ui| {
+        theme::card_frame().show(ui, |ui| {
             ui.set_width(ui.available_width());
             ui.horizontal(|ui| {
                 theme::section_label(ui, "代码洞");
@@ -2712,7 +2869,7 @@ impl ZeroApp {
                 ui.label(
                     egui::RichText::new("还没有代码洞。分配一块可执行内存，用来放跳板或自己的代码。")
                         .size(12.0)
-                        .color(theme::FAINT),
+                        .color(theme::faint()),
                 );
             } else {
                 for (index, cave) in self.inj_caves.iter().enumerate() {
@@ -2734,7 +2891,7 @@ impl ZeroApp {
                             theme::tag(
                                 ui,
                                 &format!("{} 字节", cave.size),
-                                if selected { theme::ACCENT } else { theme::MUTED },
+                                if selected { theme::accent() } else { theme::muted() },
                             );
                             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                                 if theme::outline_button(ui, "看代码", true).clicked() {
@@ -2749,7 +2906,7 @@ impl ZeroApp {
         });
         ui.add_space(14.0);
 
-        theme::card().show(ui, |ui| {
+        theme::card_frame().show(ui, |ui| {
             ui.set_width(ui.available_width());
             ui.horizontal(|ui| {
                 theme::section_label(ui, "补丁记录");
@@ -2757,7 +2914,7 @@ impl ZeroApp {
                 ui.label(
                     egui::RichText::new("每条都带着原始字节，可逐条还原。")
                         .size(10.5)
-                        .color(theme::FAINT),
+                        .color(theme::faint()),
                 );
             });
             ui.add_space(8.0);
@@ -2765,7 +2922,7 @@ impl ZeroApp {
                 ui.label(
                     egui::RichText::new("还没有补丁。填入地址和字节后点「写入并记录」。")
                         .size(12.0)
-                        .color(theme::FAINT),
+                        .color(theme::faint()),
                 );
                 return;
             }
@@ -2793,7 +2950,7 @@ impl ZeroApp {
                                             patch.size()
                                         ))
                                         .size(10.5)
-                                        .color(theme::FAINT)
+                                        .color(theme::faint())
                                         .font(FontId::monospace(10.5)),
                                     );
                                 });
@@ -2802,9 +2959,9 @@ impl ZeroApp {
                                         ui,
                                         if patch.active { "生效中" } else { "已还原" },
                                         if patch.active {
-                                            theme::WARN
+                                            theme::warn()
                                         } else {
-                                            theme::SUCCESS
+                                            theme::success()
                                         },
                                     );
                                     if patch.active
@@ -2857,7 +3014,7 @@ impl ZeroApp {
                 ui.label(
                     egui::RichText::new("把汇编文本编译成机器码，带标签，可直接送去打补丁。")
                         .size(12.5)
-                        .color(theme::MUTED),
+                        .color(theme::muted()),
                 );
             });
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
@@ -2865,22 +3022,22 @@ impl ZeroApp {
                     ui,
                     &format!("{bytes_len} 字节 · {label_count} 标签"),
                     if self.asm_result.is_some() {
-                        theme::ACCENT_2
+                        theme::accent_2()
                     } else {
-                        theme::FAINT
+                        theme::faint()
                     },
                 );
             });
         });
         ui.add_space(4.0);
 
-        theme::card().show(ui, |ui| {
+        theme::card_frame().show(ui, |ui| {
             ui.set_width(ui.available_width());
             ui.horizontal(|ui| {
                 ui.label(
                     egui::RichText::new("起始地址")
                         .size(11.0)
-                        .color(theme::FAINT),
+                        .color(theme::faint()),
                 );
                 ui.add_sized(
                     [200.0, 30.0],
@@ -2892,7 +3049,7 @@ impl ZeroApp {
                 ui.label(
                     egui::RichText::new("标签地址从起始地址算起")
                         .size(10.5)
-                        .color(theme::FAINT),
+                        .color(theme::faint()),
                 );
             });
             ui.add_space(8.0);
@@ -2913,12 +3070,12 @@ impl ZeroApp {
             });
             if let Some(error) = &self.asm_error {
                 ui.add_space(4.0);
-                ui.label(egui::RichText::new(error).size(11.0).color(theme::DANGER));
+                ui.label(egui::RichText::new(error).size(11.0).color(theme::danger()));
             }
         });
         ui.add_space(12.0);
 
-        theme::card().show(ui, |ui| {
+        theme::card_frame().show(ui, |ui| {
             ui.set_width(ui.available_width());
             ui.horizontal(|ui| {
                 theme::section_label(ui, "汇编源");
@@ -2926,7 +3083,7 @@ impl ZeroApp {
                 ui.label(
                     egui::RichText::new("支持标签、注释（; 或 //）、0x 十六进制、[基址+索引*缩放+偏移]。")
                         .size(10.5)
-                        .color(theme::FAINT),
+                        .color(theme::faint()),
                 );
             });
             ui.add_space(6.0);
@@ -2946,7 +3103,7 @@ impl ZeroApp {
         });
         ui.add_space(12.0);
 
-        theme::card().show(ui, |ui| {
+        theme::card_frame().show(ui, |ui| {
             ui.set_width(ui.available_width());
             ui.horizontal(|ui| {
                 theme::section_label(ui, "机器码");
@@ -2957,14 +3114,14 @@ impl ZeroApp {
                 ui.label(
                     egui::RichText::new("还没有结果。写好汇编后点「汇编」。")
                         .size(12.0)
-                        .color(theme::FAINT),
+                        .color(theme::faint()),
                 );
                 return;
             };
             if !result.labels.is_empty() {
                 ui.horizontal(|ui| {
                     for (name, address) in &result.labels {
-                        theme::tag(ui, &format!("{name} = {:X}", address), theme::ACCENT);
+                        theme::tag(ui, &format!("{name} = {:X}", address), theme::accent());
                     }
                 });
                 ui.add_space(6.0);
@@ -2972,7 +3129,7 @@ impl ZeroApp {
             ui.label(
                 egui::RichText::new(result.hex())
                     .size(12.5)
-                    .color(theme::TEXT)
+                    .color(theme::text())
                     .font(FontId::monospace(12.5)),
             );
             ui.add_space(8.0);
@@ -2981,7 +3138,7 @@ impl ZeroApp {
             ui.label(
                 egui::RichText::new("回读校验（反汇编这些字节）")
                     .size(10.5)
-                    .color(theme::FAINT),
+                    .color(theme::faint()),
             );
             ui.add_space(4.0);
             let back = disasm::disassemble(&result.bytes, result.origin, true, 64);
@@ -2995,20 +3152,20 @@ impl ZeroApp {
                             ui.label(
                                 egui::RichText::new(format!("{:016X}", insn.address))
                                     .size(11.0)
-                                    .color(theme::ACCENT)
+                                    .color(theme::accent())
                                     .font(FontId::monospace(11.0)),
                             );
                             ui.add_space(6.0);
                             ui.label(
                                 egui::RichText::new(format!("{:<20}", insn.hex()))
                                     .size(11.0)
-                                    .color(theme::FAINT)
+                                    .color(theme::faint())
                                     .font(FontId::monospace(11.0)),
                             );
                             ui.label(
                                 egui::RichText::new(&insn.text)
                                     .size(12.0)
-                                    .color(theme::TEXT)
+                                    .color(theme::text())
                                     .font(FontId::monospace(12.0)),
                             );
                         });
@@ -3037,23 +3194,23 @@ impl ZeroApp {
                 ui.label(
                     egui::RichText::new("读写 Cheat Engine 的 .ct 文件，和原版表格互通。")
                         .size(12.5)
-                        .color(theme::MUTED),
+                        .color(theme::muted()),
                 );
             });
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 theme::status_chip(
                     ui,
                     &format!("{count} 条"),
-                    if count > 0 { theme::ACCENT_2 } else { theme::FAINT },
+                    if count > 0 { theme::accent_2() } else { theme::faint() },
                 );
             });
         });
         ui.add_space(4.0);
 
-        theme::card().show(ui, |ui| {
+        theme::card_frame().show(ui, |ui| {
             ui.set_width(ui.available_width());
             ui.horizontal(|ui| {
-                ui.label(egui::RichText::new("文件").size(11.0).color(theme::FAINT));
+                ui.label(egui::RichText::new("文件").size(11.0).color(theme::faint()));
                 ui.add_sized(
                     [380.0, 32.0],
                     egui::TextEdit::singleline(&mut self.ct_path)
@@ -3083,20 +3240,20 @@ impl ZeroApp {
             });
             if let Some(error) = &self.ct_error {
                 ui.add_space(4.0);
-                ui.label(egui::RichText::new(error).size(11.0).color(theme::DANGER));
+                ui.label(egui::RichText::new(error).size(11.0).color(theme::danger()));
             }
             if !self.ct_status.is_empty() {
                 ui.add_space(4.0);
                 ui.label(
                     egui::RichText::new(&self.ct_status)
                         .size(10.5)
-                        .color(theme::SUCCESS),
+                        .color(theme::success()),
                 );
             }
         });
         ui.add_space(12.0);
 
-        theme::card().show(ui, |ui| {
+        theme::card_frame().show(ui, |ui| {
             ui.set_width(ui.available_width());
             ui.horizontal(|ui| {
                 theme::section_label(ui, "条目");
@@ -3104,7 +3261,7 @@ impl ZeroApp {
                 ui.label(
                     egui::RichText::new("地址支持模块+偏移、[指针]+偏移 与绝对地址。")
                         .size(10.5)
-                        .color(theme::FAINT),
+                        .color(theme::faint()),
                 );
             });
             ui.add_space(8.0);
@@ -3112,7 +3269,7 @@ impl ZeroApp {
                 ui.label(
                     egui::RichText::new("还没有打开表格。填入 .ct 路径后点「打开」。")
                         .size(12.0)
-                        .color(theme::FAINT),
+                        .color(theme::faint()),
                 );
                 return;
             };
@@ -3120,7 +3277,7 @@ impl ZeroApp {
                 ui.label(
                     egui::RichText::new("这个表格里没有 cheat entry。")
                         .size(12.0)
-                        .color(theme::FAINT),
+                        .color(theme::faint()),
                 );
                 return;
             }
@@ -3150,7 +3307,7 @@ impl ZeroApp {
                                             entry.address, entry.vtype.short()
                                         ))
                                         .size(10.5)
-                                        .color(theme::FAINT)
+                                        .color(theme::faint())
                                         .font(FontId::monospace(10.5)),
                                     );
                                 });
@@ -3158,10 +3315,10 @@ impl ZeroApp {
                                     theme::tag(
                                         ui,
                                         entry.vtype.label(),
-                                        theme::MUTED,
+                                        theme::muted(),
                                     );
                                     if let Some(value) = &entry.value {
-                                        theme::tag(ui, value, theme::WARN);
+                                        theme::tag(ui, value, theme::warn());
                                     }
                                 });
                             });
@@ -3198,20 +3355,20 @@ impl ZeroApp {
                 ui.label(
                     egui::RichText::new("周期性暂停目标进程的线程，让游戏变慢或变快。")
                         .size(12.5)
-                        .color(theme::MUTED),
+                        .color(theme::muted()),
                 );
             });
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 if running {
-                    theme::status_chip(ui, "变速中", theme::WARN);
+                    theme::status_chip(ui, "变速中", theme::warn());
                 } else {
-                    theme::status_chip(ui, "未启用", theme::FAINT);
+                    theme::status_chip(ui, "未启用", theme::faint());
                 }
             });
         });
         ui.add_space(4.0);
 
-        theme::card().show(ui, |ui| {
+        theme::card_frame().show(ui, |ui| {
             ui.set_width(ui.available_width());
             ui.horizontal(|ui| {
                 theme::section_label(ui, "倍率");
@@ -3251,7 +3408,7 @@ impl ZeroApp {
                     theme::status_chip(
                         ui,
                         &format!("{} 个线程", self.speed_threads),
-                        theme::ACCENT_2,
+                        theme::accent_2(),
                     );
                 }
             });
@@ -3259,16 +3416,16 @@ impl ZeroApp {
             ui.label(
                 egui::RichText::new(self.speed_description())
                     .size(10.5)
-                    .color(theme::FAINT),
+                    .color(theme::faint()),
             );
             if let Some(error) = &self.speed_error {
                 ui.add_space(4.0);
-                ui.label(egui::RichText::new(error).size(11.0).color(theme::DANGER));
+                ui.label(egui::RichText::new(error).size(11.0).color(theme::danger()));
             }
         });
         ui.add_space(12.0);
 
-        theme::card().show(ui, |ui| {
+        theme::card_frame().show(ui, |ui| {
             ui.set_width(ui.available_width());
             theme::section_label(ui, "说明");
             ui.add_space(6.0);
@@ -3281,7 +3438,7 @@ impl ZeroApp {
                 ui.label(
                     egui::RichText::new(format!("· {line}"))
                         .size(11.0)
-                        .color(theme::MUTED),
+                        .color(theme::muted()),
                 );
                 ui.add_space(2.0);
             }
@@ -3308,20 +3465,20 @@ impl ZeroApp {
                 ui.label(
                     egui::RichText::new("执行 Cheat Engine 风格的 Lua 脚本，直接读写目标进程。")
                         .size(12.5)
-                        .color(theme::MUTED),
+                        .color(theme::muted()),
                 );
             });
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 if attached {
-                    theme::status_chip(ui, "已连接", theme::SUCCESS);
+                    theme::status_chip(ui, "已连接", theme::success());
                 } else {
-                    theme::status_chip(ui, "未连接", theme::FAINT);
+                    theme::status_chip(ui, "未连接", theme::faint());
                 }
             });
         });
         ui.add_space(4.0);
 
-        theme::card().show(ui, |ui| {
+        theme::card_frame().show(ui, |ui| {
             ui.set_width(ui.available_width());
             ui.horizontal(|ui| {
                 if theme::gradient_button(ui, "运行", 96.0, true).clicked() {
@@ -3336,14 +3493,14 @@ impl ZeroApp {
                     ui.label(
                         egui::RichText::new("未连接进程时只能跑纯计算脚本。")
                             .size(10.5)
-                            .color(theme::FAINT),
+                            .color(theme::faint()),
                     );
                 }
             });
         });
         ui.add_space(12.0);
 
-        theme::card().show(ui, |ui| {
+        theme::card_frame().show(ui, |ui| {
             ui.set_width(ui.available_width());
             ui.horizontal(|ui| {
                 theme::section_label(ui, "脚本");
@@ -3351,7 +3508,7 @@ impl ZeroApp {
                 ui.label(
                     egui::RichText::new("可用：print / readInteger / writeInteger / readBytes / writeBytes / getAddress")
                         .size(10.5)
-                        .color(theme::FAINT),
+                        .color(theme::faint()),
                 );
             });
             ui.add_space(6.0);
@@ -3371,7 +3528,7 @@ impl ZeroApp {
         });
         ui.add_space(12.0);
 
-        theme::card().show(ui, |ui| {
+        theme::card_frame().show(ui, |ui| {
             ui.set_width(ui.available_width());
             theme::section_label(ui, "输出");
             ui.add_space(6.0);
@@ -3379,7 +3536,7 @@ impl ZeroApp {
                 ui.label(
                     egui::RichText::new(error)
                         .size(11.5)
-                        .color(theme::DANGER)
+                        .color(theme::danger())
                         .font(FontId::monospace(11.5)),
                 );
                 return;
@@ -3388,7 +3545,7 @@ impl ZeroApp {
                 ui.label(
                     egui::RichText::new("还没有输出。")
                         .size(12.0)
-                        .color(theme::FAINT),
+                        .color(theme::faint()),
                 );
                 return;
             }
@@ -3401,7 +3558,7 @@ impl ZeroApp {
                         ui.label(
                             egui::RichText::new(line)
                                 .size(12.0)
-                                .color(theme::TEXT)
+                                .color(theme::text())
                                 .font(FontId::monospace(12.0)),
                         );
                     }
@@ -3421,15 +3578,15 @@ impl ZeroApp {
         let running = self.watch_running;
         let count = self.watches.len();
 
-        theme::card().show(ui, |ui| {
+        theme::card_frame().show(ui, |ui| {
             ui.set_width(ui.available_width());
             ui.horizontal(|ui| {
                 ui.label(egui::RichText::new("观察队列").size(14.0).strong());
                 if count > 0 {
-                    theme::tag(ui, &format!("{count} 个"), theme::ACCENT);
+                    theme::tag(ui, &format!("{count} 个"), theme::accent());
                 }
                 if running {
-                    theme::tag(ui, "采样中", theme::SUCCESS);
+                    theme::tag(ui, "采样中", theme::success());
                 }
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     if count > 0 && theme::outline_button(ui, "选取最佳", running).clicked() && running
@@ -3455,7 +3612,7 @@ impl ZeroApp {
                         "扫描完成后，可以把最可能的几个地址放进观察队列：改变游戏里的数值，看哪个跟着动。",
                     )
                     .size(11.5)
-                    .color(theme::FAINT),
+                    .color(theme::faint()),
                 );
                 return;
             }
@@ -3471,19 +3628,19 @@ impl ZeroApp {
                             _ => "未采样",
                         },
                         match watch.behaviour_rank() {
-                            3 => theme::ACCENT_2,
-                            2 => theme::SUCCESS,
-                            1 => theme::FAINT,
-                            _ => theme::FAINT,
+                            3 => theme::accent_2(),
+                            2 => theme::success(),
+                            1 => theme::faint(),
+                            _ => theme::faint(),
                         },
                     );
                     ui.label(
                         egui::RichText::new(format!("{:016X}", watch.address))
                             .size(11.5)
                             .font(FontId::monospace(11.5))
-                            .color(theme::ACCENT),
+                            .color(theme::accent()),
                     );
-                    theme::tag(ui, watch.vtype.short(), theme::MUTED);
+                    theme::tag(ui, watch.vtype.short(), theme::muted());
                     let current = watch
                         .current
                         .as_ref()
@@ -3493,7 +3650,7 @@ impl ZeroApp {
                         egui::RichText::new(current)
                             .size(12.0)
                             .font(FontId::monospace(12.0))
-                            .color(theme::TEXT),
+                            .color(theme::text()),
                     );
                     if let Some(delta) = watch.delta() {
                         if delta.abs() > f64::EPSILON {
@@ -3502,9 +3659,9 @@ impl ZeroApp {
                                     .size(11.0)
                                     .font(FontId::monospace(11.0))
                                     .color(if delta > 0.0 {
-                                        theme::WARN
+                                        theme::warn()
                                     } else {
-                                        theme::DANGER
+                                        theme::danger()
                                     }),
                             );
                         }
@@ -3513,7 +3670,7 @@ impl ZeroApp {
                         ui.label(
                             egui::RichText::new(format!("{} 分", watch.score))
                                 .size(10.0)
-                                .color(theme::FAINT),
+                                .color(theme::faint()),
                         );
                     });
                 });
@@ -3537,17 +3694,17 @@ impl ZeroApp {
     /// service toggle.
     pub fn mcp_panel(&mut self, ui: &mut egui::Ui) {
         let running = self.mcp.is_some();
-        theme::card().show(ui, |ui| {
+        theme::card_frame().show(ui, |ui| {
             ui.set_width(ui.available_width());
             ui.horizontal(|ui| {
                 let (rect, _) = ui.allocate_exact_size(Vec2::splat(18.0), Sense::hover());
-                theme::paint_icon(ui.painter(), rect.shrink(2.0), IconKind::Bolt, theme::ACCENT_2);
+                theme::paint_icon(ui.painter(), rect.shrink(2.0), IconKind::Bolt, theme::accent_2());
                 ui.label(egui::RichText::new("MCP 服务").size(14.0).strong());
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     if running {
-                        theme::tag(ui, "运行中", theme::SUCCESS);
+                        theme::tag(ui, "运行中", theme::success());
                     } else {
-                        theme::tag(ui, "已关闭", theme::FAINT);
+                        theme::tag(ui, "已关闭", theme::faint());
                     }
                 });
             });
@@ -3557,7 +3714,7 @@ impl ZeroApp {
                     "让外部 AI 助手通过 MCP 驱动 Zero 扫描与读写内存。关闭时端口不监听。",
                 )
                 .size(11.0)
-                .color(theme::MUTED),
+                .color(theme::muted()),
             );
             ui.add_space(8.0);
             ui.horizontal(|ui| {
@@ -3573,7 +3730,7 @@ impl ZeroApp {
                 }
                 if !running {
                     ui.add_space(8.0);
-                    ui.label(egui::RichText::new("端口").size(10.5).color(theme::FAINT));
+                    ui.label(egui::RichText::new("端口").size(10.5).color(theme::faint()));
                     ui.add(
                         egui::DragValue::new(&mut self.mcp_port)
                             .clamp_range(1024..=65_000)
@@ -3584,13 +3741,13 @@ impl ZeroApp {
             if let Some(service) = &self.mcp {
                 ui.add_space(8.0);
                 let url = service.url();
-                ui.label(egui::RichText::new("连接地址").size(10.5).color(theme::FAINT));
+                ui.label(egui::RichText::new("连接地址").size(10.5).color(theme::faint()));
                 ui.horizontal(|ui| {
                     ui.label(
                         egui::RichText::new(&url)
                             .size(10.5)
                             .font(FontId::monospace(10.5))
-                            .color(theme::TEXT),
+                            .color(theme::text()),
                     );
                     if theme::outline_button(ui, "复制", true).clicked() {
                         ui.output_mut(|o| o.copied_text = url.clone());
@@ -3600,14 +3757,177 @@ impl ZeroApp {
                 ui.label(
                     egui::RichText::new("POST 到该地址，JSON-RPC 2.0。GET 可做健康检查。")
                         .size(10.0)
-                        .color(theme::FAINT),
+                        .color(theme::faint()),
                 );
             }
             if let Some(error) = &self.mcp_error {
                 ui.add_space(4.0);
-                ui.label(egui::RichText::new(error).size(10.5).color(theme::DANGER));
+                ui.label(egui::RichText::new(error).size(10.5).color(theme::danger()));
             }
         });
+    }
+
+    /// 设置里的「自动更新」卡片：版本、发布说明、下载进度和操作按钮。
+    pub fn update_panel(&mut self, ui: &mut egui::Ui) {
+        use crate::update::{self, State};
+        let mut check_now = false;
+        let mut download_now = false;
+        let mut install_now = false;
+        let mut skip_version: Option<String> = None;
+        let mut open_releases = false;
+
+        theme::card_frame().show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.horizontal(|ui| {
+                let (rect, _) = ui.allocate_exact_size(Vec2::splat(18.0), Sense::hover());
+                theme::paint_icon(ui.painter(), rect.shrink(2.0), IconKind::Refresh, theme::accent_2());
+                ui.label(egui::RichText::new("自动更新").size(14.0).strong());
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| match &self.update.state {
+                    State::Idle => {
+                        theme::tag(ui, "未检查", theme::faint());
+                    }
+                    State::Checking => {
+                        theme::tag(ui, "检查中", theme::accent());
+                    }
+                    State::Current => {
+                        theme::tag(ui, "已是最新", theme::success());
+                    }
+                    State::Available(r) => {
+                        theme::tag(ui, &format!("v{} 可用", r.version), theme::warn());
+                    }
+                    State::Downloading(_) => {
+                        theme::tag(ui, "下载中", theme::accent());
+                    }
+                    State::Ready(_) => {
+                        theme::tag(ui, "待重启", theme::success());
+                    }
+                    State::Failed(_) => {
+                        theme::tag(ui, "检查失败", theme::danger());
+                    }
+                });
+            });
+            ui.add_space(6.0);
+            ui.label(
+                egui::RichText::new(format!(
+                    "当前 v{}。版本信息取自 GitHub release，下载走 gh-proxy.com 镜像；只读取，不上报任何数据。",
+                    update::VERSION
+                ))
+                .size(11.0)
+                .color(theme::muted()),
+            );
+
+            match &self.update.state {
+                State::Available(release) => {
+                    ui.add_space(6.0);
+                    ui.label(
+                        egui::RichText::new(format!(
+                            "新版本 v{} · {} · {:.1} MB",
+                            release.version,
+                            release.asset_name,
+                            release.asset_size as f64 / 1_048_576.0
+                        ))
+                        .size(11.0)
+                        .color(theme::text()),
+                    );
+                    let notes: Vec<&str> = release
+                        .notes
+                        .lines()
+                        .filter(|l| !l.trim().is_empty())
+                        .take(6)
+                        .collect();
+                    if !notes.is_empty() {
+                        ui.add_space(4.0);
+                        theme::soft_card().show(ui, |ui| {
+                            for line in notes {
+                                ui.label(egui::RichText::new(line).size(10.5).color(theme::muted()));
+                            }
+                        });
+                    }
+                }
+                State::Downloading(pct) => {
+                    ui.add_space(8.0);
+                    ui.add(
+                        egui::ProgressBar::new((pct / 100.0).clamp(0.0, 1.0))
+                            .text(format!("{pct:.0}%"))
+                            .desired_width(ui.available_width())
+                            .fill(theme::accent()),
+                    );
+                }
+                State::Ready(_) => {
+                    ui.add_space(6.0);
+                    ui.label(
+                        egui::RichText::new("文件已下载。重启后会先替换程序，再自动打开新版。")
+                            .size(11.0)
+                            .color(theme::success()),
+                    );
+                }
+                State::Failed(error) => {
+                    ui.add_space(6.0);
+                    ui.label(egui::RichText::new(error).size(10.5).color(theme::danger()));
+                }
+                _ => {}
+            }
+
+            ui.add_space(8.0);
+            ui.horizontal(|ui| {
+                if theme::outline_button(ui, "检查更新", !self.update.busy()).clicked() {
+                    check_now = true;
+                }
+                match &self.update.state {
+                    State::Available(_) => {
+                        if theme::gradient_button(ui, "下载并安装", 120.0, true).clicked() {
+                            download_now = true;
+                        }
+                        if theme::outline_button(ui, "跳过此版本", true).clicked() {
+                            if let State::Available(release) = &self.update.state {
+                                skip_version = Some(release.version.clone());
+                            }
+                        }
+                    }
+                    State::Ready(_) => {
+                        if theme::gradient_button(ui, "重启并安装", 120.0, true).clicked() {
+                            install_now = true;
+                        }
+                    }
+                    _ => {}
+                }
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    if theme::outline_button(ui, "发行页", true).clicked() {
+                        open_releases = true;
+                    }
+                });
+            });
+            ui.add_space(4.0);
+            ui.label(
+                egui::RichText::new(if self.update.auto {
+                    "启动后会自动检查，最多每 6 小时一次。"
+                } else {
+                    "自动检查已关闭。"
+                })
+                .size(10.0)
+                .color(theme::faint()),
+            );
+        });
+
+        if check_now {
+            self.update.check(true);
+        }
+        if let Some(version) = skip_version {
+            self.update.skipped = Some(version.clone());
+            self.toast(format!("已跳过 v{version}，下次有更新再提醒"), ToastKind::Info);
+        }
+        if download_now {
+            if let State::Available(release) = &self.update.state {
+                let release = release.clone();
+                self.update.download(&release);
+            }
+        }
+        if open_releases {
+            update::open_page(update::RELEASES_PAGE);
+        }
+        if install_now && self.apply_update() {
+            std::process::exit(0);
+        }
     }
 
     /// Shows what the one-click verification found. Honest about what it did
@@ -3625,8 +3945,8 @@ impl ZeroApp {
             .anchor(Align2::CENTER_CENTER, Vec2::ZERO)
             .frame(
                 Frame::none()
-                    .fill(theme::PANEL)
-                    .stroke(Stroke::new(1.0, theme::BORDER))
+                    .fill(theme::panel())
+                    .stroke(Stroke::new(1.0, theme::border()))
                     .rounding(Rounding::same(14.0))
                     .inner_margin(Margin::same(20.0)),
             )
@@ -3636,9 +3956,9 @@ impl ZeroApp {
                     ui.label(egui::RichText::new("验证结果").size(18.0).strong());
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         match self.e2e_ok {
-                            Some(true) => theme::tag(ui, "全部通过", theme::SUCCESS),
-                            Some(false) => theme::tag(ui, "有失败项", theme::DANGER),
-                            None => theme::tag(ui, "未运行", theme::FAINT),
+                            Some(true) => theme::tag(ui, "全部通过", theme::success()),
+                            Some(false) => theme::tag(ui, "有失败项", theme::danger()),
+                            None => theme::tag(ui, "未运行", theme::faint()),
                         };
                     });
                 });
@@ -3652,11 +3972,11 @@ impl ZeroApp {
                     .show(ui, |ui| {
                         for line in self.e2e_log.lines() {
                             let colour = if line.starts_with("PASS") {
-                                theme::SUCCESS
+                                theme::success()
                             } else if line.starts_with("FAIL") {
-                                theme::DANGER
+                                theme::danger()
                             } else {
-                                theme::MUTED
+                                theme::muted()
                             };
                             ui.label(
                                 egui::RichText::new(line)
@@ -3686,8 +4006,8 @@ impl ZeroApp {
             .anchor(Align2::CENTER_CENTER, Vec2::ZERO)
             .frame(
                 Frame::none()
-                    .fill(theme::CARD)
-                    .stroke(Stroke::new(1.0, theme::BORDER_SOFT))
+                    .fill(theme::card())
+                    .stroke(Stroke::new(1.0, theme::border_soft()))
                     .rounding(Rounding::same(14.0))
                     .inner_margin(Margin::symmetric(22.0, 18.0)),
             )
@@ -3696,17 +4016,17 @@ impl ZeroApp {
                 ui.label(
                     egui::RichText::new("照着 Cheat Engine 的习惯排的")
                         .size(11.0)
-                        .color(theme::FAINT),
+                        .color(theme::faint()),
                 );
                 ui.add_space(10.0);
                 for shortcut in hotkey::SHORTCUTS {
                     ui.horizontal(|ui| {
-                        theme::tag(ui, shortcut.label, theme::ACCENT);
+                        theme::tag(ui, shortcut.label, theme::accent());
                         ui.add_space(10.0);
                         ui.label(
                             egui::RichText::new(shortcut.description)
                                 .size(12.0)
-                                .color(theme::TEXT),
+                                .color(theme::text()),
                         );
                     });
                     ui.add_space(5.0);
@@ -3717,7 +4037,7 @@ impl ZeroApp {
                 ui.label(
                     egui::RichText::new("输入框有焦点时不会抢按键；按 F1 或 Esc 关闭。")
                         .size(10.5)
-                        .color(theme::FAINT),
+                        .color(theme::faint()),
                 );
             });
         if !open {
@@ -3740,7 +4060,7 @@ impl ZeroApp {
                 for toast in &self.toasts {
                     let (color, label) = theme::toast_style(toast.kind);
                     Frame::none()
-                        .fill(theme::CARD)
+                        .fill(theme::card())
                         .stroke(Stroke::new(1.0, color.gamma_multiply(0.55)))
                         .rounding(Rounding::same(11.0))
                         .inner_margin(Margin::symmetric(14.0, 10.0))
@@ -3773,7 +4093,7 @@ impl ZeroApp {
                                     ui.label(
                                         egui::RichText::new(&toast.text)
                                             .size(11.5)
-                                            .color(theme::TEXT),
+                                            .color(theme::text()),
                                     );
                                 });
                             });
@@ -3811,8 +4131,8 @@ impl ZeroApp {
             .fixed_size(Vec2::new(760.0, 610.0))
             .frame(
                 Frame::none()
-                    .fill(theme::PANEL)
-                    .stroke(Stroke::new(1.0, theme::BORDER))
+                    .fill(theme::panel())
+                    .stroke(Stroke::new(1.0, theme::border()))
                     .rounding(Rounding::same(16.0))
                     .inner_margin(Margin::same(18.0))
                     .shadow(egui::epaint::Shadow {
@@ -3829,7 +4149,7 @@ impl ZeroApp {
                         ui.label(
                             egui::RichText::new("选择一个正在运行的游戏或练习靶场")
                                 .size(11.5)
-                                .color(theme::MUTED),
+                                .color(theme::muted()),
                         );
                     });
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
@@ -3855,7 +4175,7 @@ impl ZeroApp {
                     ui.label(
                         egui::RichText::new(format!("{} 个进程", self.processes.len()))
                             .size(10.5)
-                            .color(theme::FAINT),
+                            .color(theme::faint()),
                     );
                 });
                 ui.add_space(6.0);
@@ -3864,7 +4184,7 @@ impl ZeroApp {
                     ui.add_space(30.0);
                     ui.vertical_centered(|ui| {
                         ui.spinner();
-                        ui.label(egui::RichText::new("正在读取进程…").size(12.0).color(theme::MUTED));
+                        ui.label(egui::RichText::new("正在读取进程…").size(12.0).color(theme::muted()));
                     });
                     return;
                 }
@@ -3886,7 +4206,7 @@ impl ZeroApp {
                         ui.label(
                             egui::RichText::new("没有匹配的进程")
                                 .size(13.0)
-                                .color(theme::MUTED),
+                                .color(theme::muted()),
                         );
                     });
                 } else {
@@ -3916,23 +4236,23 @@ impl ZeroApp {
                                     icon,
                                     Rounding::same(8.0),
                                     if practice {
-                                        theme::ACCENT_2.gamma_multiply(0.16)
+                                        theme::accent_2().gamma_multiply(0.16)
                                     } else {
-                                        theme::ACCENT.gamma_multiply(0.10)
+                                        theme::accent().gamma_multiply(0.10)
                                     },
                                 );
                                 theme::paint_icon(
                                     ui.painter(),
                                     icon.shrink(7.0),
                                     IconKind::Practice,
-                                    if practice { theme::ACCENT_2 } else { theme::ACCENT },
+                                    if practice { theme::accent_2() } else { theme::accent() },
                                 );
                                 ui.painter().text(
                                     rect.left_center() + Vec2::new(48.0, -8.0),
                                     Align2::LEFT_CENTER,
                                     if info.name.is_empty() { "系统进程" } else { &info.name },
                                     FontId::proportional(12.5),
-                                    theme::TEXT,
+                                    theme::text(),
                                 );
                                 let detail = format!(
                                     "PID {}  ·  {}{}",
@@ -3945,7 +4265,7 @@ impl ZeroApp {
                                     Align2::LEFT_CENTER,
                                     detail,
                                     FontId::proportional(10.0),
-                                    if practice { theme::ACCENT_2 } else { theme::FAINT },
+                                    if practice { theme::accent_2() } else { theme::faint() },
                                 );
                                 if ui
                                     .put(
@@ -3974,7 +4294,7 @@ impl ZeroApp {
                             "提示：游戏以管理员运行时，Zero 也需要管理员权限。"
                         })
                         .size(10.5)
-                        .color(theme::FAINT),
+                        .color(theme::faint()),
                     );
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         if theme::outline_button(ui, "以管理员身份重启", true).clicked() {
@@ -3983,7 +4303,7 @@ impl ZeroApp {
                     });
                 });
                 if let Some(error) = &self.attach_error {
-                    ui.label(egui::RichText::new(error).size(11.0).color(theme::DANGER));
+                    ui.label(egui::RichText::new(error).size(11.0).color(theme::danger()));
                 }
             });
         if close {
@@ -3999,6 +4319,170 @@ impl ZeroApp {
         }
     }
 
+    /// 设置里的「外观与主题」卡片：内置主题与主题包网格、一键切换、
+    /// 重新扫描、打开主题文件夹，以及被跳过的包的报错原因。
+    fn theme_card(&mut self, ui: &mut egui::Ui) {
+        let mut apply: Option<String> = None;
+        let mut reload = false;
+        let mut open_dir = false;
+        theme::soft_card().show(ui, |ui| {
+            ui.horizontal(|ui| {
+                ui.vertical(|ui| {
+                    ui.label(egui::RichText::new("外观与主题").size(14.0).strong());
+                    ui.label(
+                        egui::RichText::new("主题包放在 Zero 数据目录的 themes 文件夹，JSON 格式，改完点「重新扫描」即生效。")
+                            .size(10.5)
+                            .color(theme::muted()),
+                    );
+                });
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    if theme::outline_button(ui, "打开主题文件夹", true).clicked() {
+                        open_dir = true;
+                    }
+                    if theme::outline_button(ui, "重新扫描", true).clicked() {
+                        reload = true;
+                    }
+                });
+            });
+            ui.add_space(8.0);
+            let themes = theme::themes();
+            let active = theme::active_id();
+            // 一排最多放多少个主题卡，随宽度收缩。
+            let per_row = (ui.available_width() / 300.0).max(2.0).floor() as usize;
+            let grid = egui::Grid::new("zero_theme_grid")
+                .num_columns(per_row)
+                .min_col_width(280.0)
+                .max_col_width(320.0)
+                .spacing(Vec2::new(10.0, 10.0))
+                .striped(false);
+            grid.show(ui, |ui| {
+                for (i, palette) in themes.iter().enumerate() {
+                    let selected = palette.id == active;
+                    let (rect, response) = ui.allocate_exact_size(
+                        Vec2::new(0.0, 64.0),
+                        Sense::click(),
+                    );
+                    let hovered = response.hovered();
+                    ui.painter().rect_filled(
+                        rect,
+                        Rounding::same(10.0),
+                        if selected {
+                            theme::accent().gamma_multiply(0.14)
+                        } else if hovered {
+                            theme::card_hi()
+                        } else {
+                            theme::card_soft()
+                        },
+                    );
+                    ui.painter().rect_stroke(
+                        rect,
+                        Rounding::same(10.0),
+                        Stroke::new(
+                            1.0,
+                            if selected {
+                                theme::accent()
+                            } else {
+                                theme::border_soft()
+                            },
+                        ),
+                    );
+                    // 色板：一行小圆点。
+                    let swatches = [
+                        palette.bg,
+                        palette.card,
+                        palette.accent,
+                        palette.accent_2,
+                        palette.warn,
+                        palette.success,
+                    ];
+                    let start = egui::pos2(rect.left() + 14.0, rect.top() + 14.0);
+                    for (idx, color) in swatches.iter().enumerate() {
+                        let center = start + Vec2::new(idx as f32 * 22.0, 0.0);
+                        ui.painter().circle_filled(center, 8.0, *color);
+                        ui.painter().circle_stroke(
+                            center,
+                            8.0,
+                            Stroke::new(1.0, theme::border()),
+                        );
+                    }
+                    // 名称 + 来源。
+                    ui.painter().text(
+                        egui::pos2(rect.left() + 14.0, rect.top() + 38.0),
+                        Align2::LEFT_CENTER,
+                        &palette.name,
+                        FontId::proportional(12.5),
+                        theme::text(),
+                    );
+                    ui.painter().text(
+                        egui::pos2(rect.left() + 14.0, rect.top() + 54.0),
+                        Align2::LEFT_CENTER,
+                        if palette.origin == "内置" {
+                            palette.hint.as_str()
+                        } else {
+                            "主题包"
+                        },
+                        FontId::proportional(10.0),
+                        if palette.origin == "内置" {
+                            theme::faint()
+                        } else {
+                            theme::accent_2()
+                        },
+                    );
+                    if selected {
+                        theme::paint_icon(
+                            ui.painter(),
+                            egui::Rect::from_center_size(
+                                rect.right_top() + Vec2::new(-14.0, 14.0),
+                                Vec2::splat(14.0),
+                            ),
+                            IconKind::Check,
+                            theme::accent(),
+                        );
+                    }
+                    if response.clicked() {
+                        apply = Some(palette.id.clone());
+                    }
+                    if (i + 1) % per_row == 0 {
+                        ui.end_row();
+                    }
+                }
+            });
+            let errors = theme::pack_errors();
+            if !errors.is_empty() {
+                ui.add_space(6.0);
+                theme::divider(ui);
+                ui.add_space(4.0);
+                ui.label(
+                    egui::RichText::new("有主题包被跳过（不影响使用）：")
+                        .size(10.5)
+                        .color(theme::warn()),
+                );
+                for error in errors {
+                    ui.label(
+                        egui::RichText::new(format!("· {error}"))
+                            .size(10.0)
+                            .color(theme::danger()),
+                    );
+                }
+            }
+        });
+        if let Some(id) = apply {
+            if theme::set_theme(&id) {
+                self.toast("主题已切换。", ToastKind::Success);
+            } else {
+                self.toast("找不到这个主题：主题包可能已被删除。", ToastKind::Warn);
+            }
+        }
+        if reload {
+            let count = theme::reload();
+            self.toast(format!("已重新扫描主题：当前共 {count} 个可用。"), ToastKind::Info);
+        }
+        if open_dir {
+            let dir = theme::themes_dir();
+            let _ = std::process::Command::new("explorer").arg(&dir).spawn();
+        }
+    }
+
     fn settings_modal(&mut self, ctx: &egui::Context) {
         let mut close = false;
         let mut admin = false;
@@ -4008,11 +4492,11 @@ impl ZeroApp {
             .collapsible(false)
             .resizable(false)
             .anchor(Align2::CENTER_CENTER, Vec2::ZERO)
-            .fixed_size(Vec2::new(540.0, 480.0))
+            .fixed_size(Vec2::new(560.0, 700.0))
             .frame(
                 Frame::none()
-                    .fill(theme::PANEL)
-                    .stroke(Stroke::new(1.0, theme::BORDER))
+                    .fill(theme::panel())
+                    .stroke(Stroke::new(1.0, theme::border()))
                     .rounding(Rounding::same(16.0))
                     .inner_margin(Margin::same(20.0))
                     .shadow(egui::epaint::Shadow {
@@ -4029,7 +4513,7 @@ impl ZeroApp {
                         ui.label(
                             egui::RichText::new("这些选项会立即影响下一次扫描")
                                 .size(11.5)
-                                .color(theme::MUTED),
+                                .color(theme::muted()),
                         );
                     });
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
@@ -4039,6 +4523,12 @@ impl ZeroApp {
                     });
                 });
                 ui.add_space(10.0);
+                let body_h = (ui.available_height() - 46.0).max(200.0);
+                egui::ScrollArea::vertical()
+                    .id_source("zero_settings_body")
+                    .max_height(body_h)
+                    .auto_shrink([false, false])
+                    .show(ui, |ui| {
                 theme::soft_card().show(ui, |ui| {
                     ui.checkbox(&mut self.fast, "快速扫描（按 4 字节对齐，速度更快）");
                     ui.checkbox(&mut self.writable_only, "只扫描可写内存（减少无关结果）");
@@ -4049,16 +4539,19 @@ impl ZeroApp {
                                 .clamp_range(10_000..=2_000_000)
                                 .speed(1_000),
                         );
-                        ui.label(egui::RichText::new("个").size(11.0).color(theme::FAINT));
+                        ui.label(egui::RichText::new("个").size(11.0).color(theme::faint()));
                     });
                     ui.label(
                         egui::RichText::new("默认值：快速扫描开启，仅可写内存，最多 200,000 个结果。")
                             .size(10.0)
-                            .color(theme::FAINT),
+                            .color(theme::faint()),
                     );
                 });
+                self.theme_card(ui);
                 ui.add_space(10.0);
                 self.mcp_panel(ui);
+                ui.add_space(10.0);
+                self.update_panel(ui);
                 ui.add_space(10.0);
                 theme::soft_card().show(ui, |ui| {
                     ui.label(egui::RichText::new("关于 Zero").size(12.5).strong());
@@ -4067,9 +4560,20 @@ impl ZeroApp {
                             "Zero 是一个独立重制的内存扫描工作台，面向单人 / 离线游戏的学习与调试。它不注入进程、不绕过反作弊，也不上传任何数据。",
                         )
                         .size(10.5)
-                        .color(theme::MUTED),
+                        .color(theme::muted()),
+                    );
+                    ui.add_space(4.0);
+                    ui.label(
+                        egui::RichText::new(format!(
+                            "版本 v{} · MIT 许可证 · {}",
+                            crate::update::VERSION,
+                            crate::update::RELEASES_PAGE
+                        ))
+                        .size(10.0)
+                        .color(theme::faint()),
                     );
                 });
+                    });
                 ui.add_space(10.0);
                 ui.horizontal(|ui| {
                     if theme::outline_button(ui, "以管理员身份重启", true).clicked() {
@@ -4102,8 +4606,8 @@ impl ZeroApp {
             .fixed_size(Vec2::new(520.0, 470.0))
             .frame(
                 Frame::none()
-                    .fill(theme::PANEL)
-                    .stroke(Stroke::new(1.0, theme::BORDER))
+                    .fill(theme::panel())
+                    .stroke(Stroke::new(1.0, theme::border()))
                     .rounding(Rounding::same(16.0))
                     .inner_margin(Margin::same(20.0))
                     .shadow(egui::epaint::Shadow {
@@ -4120,7 +4624,7 @@ impl ZeroApp {
                         ui.label(
                             egui::RichText::new("支持 0x 开头的十六进制地址")
                                 .size(11.5)
-                                .color(theme::MUTED),
+                                .color(theme::muted()),
                         );
                     });
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
@@ -4170,7 +4674,7 @@ impl ZeroApp {
                             "未连接进程，只会保存地址"
                         })
                         .size(10.0)
-                        .color(theme::FAINT),
+                        .color(theme::faint()),
                     );
                 });
             });
@@ -4196,8 +4700,8 @@ impl ZeroApp {
                 .fixed_size(Vec2::new(520.0, 440.0))
                 .frame(
                     Frame::none()
-                        .fill(theme::PANEL)
-                        .stroke(Stroke::new(1.0, theme::BORDER))
+                        .fill(theme::panel())
+                        .stroke(Stroke::new(1.0, theme::border()))
                         .rounding(Rounding::same(16.0))
                         .inner_margin(Margin::same(20.0))
                         .shadow(egui::epaint::Shadow {
@@ -4214,7 +4718,7 @@ impl ZeroApp {
                             ui.label(
                                 egui::RichText::new("修改会立即写入目标进程")
                                     .size(11.5)
-                                    .color(theme::WARN),
+                                    .color(theme::warn()),
                             );
                         });
                         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
@@ -4278,7 +4782,7 @@ fn cell_label(ui: &mut egui::Ui, width: f32, text: &str, muted: bool) {
         width,
         text,
         FontId::proportional(11.5),
-        if muted { theme::MUTED } else { theme::TEXT },
+        if muted { theme::muted() } else { theme::text() },
     );
 }
 
@@ -4325,15 +4829,15 @@ fn cell_button(ui: &mut egui::Ui, width: f32, text: &str, color: Color32) -> Res
 
 fn field_label(ui: &mut egui::Ui, text: &str) {
     ui.add_space(6.0);
-    ui.label(egui::RichText::new(text).size(10.5).color(theme::FAINT));
+    ui.label(egui::RichText::new(text).size(10.5).color(theme::faint()));
 }
 
 fn type_color(ty: VType) -> Color32 {
     match ty {
-        VType::F32 | VType::F64 => theme::ACCENT_2,
-        VType::Str => theme::WARN,
-        VType::Auto => theme::ACCENT,
-        _ => theme::ACCENT,
+        VType::F32 | VType::F64 => theme::accent_2(),
+        VType::Str => theme::warn(),
+        VType::Auto => theme::accent(),
+        _ => theme::accent(),
     }
 }
 

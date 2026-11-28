@@ -290,7 +290,7 @@ fn dispatch(request: &Json, engine: &Arc<Mutex<Engine>>) -> Option<Json> {
         "initialize" => Ok(json!({
             "protocolVersion": "2024-11-05",
             "capabilities": { "tools": {} },
-            "serverInfo": { "name": "zero-scanner", "version": "0.1.0" }
+            "serverInfo": { "name": "zero-scanner", "version": env!("CARGO_PKG_VERSION") }
         })),
         "tools/list" => Ok(json!({ "tools": tool_definitions() })),
         "tools/call" => {

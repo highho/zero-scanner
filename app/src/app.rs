@@ -16,6 +16,7 @@ use crate::smart::{self, SmartPlan};
 use crate::syms;
 use crate::theme::{self, ToastKind};
 use crate::triage;
+use crate::update::{self, Updater};
 use crate::winmem::{self, ModuleInfo, ProcessHandle, ProcessInfo};
 use eframe::egui;
 use std::path::PathBuf;
@@ -39,6 +40,7 @@ pub enum Tab {
     Table,
     Speed,
     Script,
+    Struct,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -233,7 +235,13 @@ pub struct ZeroApp {
     pub smart_msgs: Vec<SmartMsg>,
 
     pub show_settings: bool,
+    pub update: Updater,
     pub toasts: Vec<Toast>,
+    pub struct_addr: String,
+    pub struct_size: usize,
+    pub struct_result: Option<crate::structs::Dissect>,
+    pub struct_error: Option<String>,
+    pub struct_loaded: bool,
 
     pub screenshot: Option<ScreenshotJob>,
 
@@ -251,8 +259,10 @@ impl ZeroApp {
         demo: bool,
     ) -> Self {
         theme::setup_fonts(&cc.egui_ctx);
+        theme::init();
         theme::apply_style(&cc.egui_ctx);
         let freeze = start_freeze_thread();
+        let plugin_notices = if demo { Vec::new() } else { crate::plugins::discover() };
         let mut app = Self {
             tab: Tab::Scan,
             process: None,
@@ -351,7 +361,13 @@ impl ZeroApp {
                 text: "你好，我是 Zero 的本地智能助手。告诉我你在游戏里看到的数值，例如「我的金币是 9800」，我会帮你选好扫描类型。".to_string(),
             }],
             show_settings: false,
+            update: Updater::default(),
             toasts: Vec::new(),
+            struct_addr: String::new(),
+            struct_size: 96,
+            struct_result: None,
+            struct_error: None,
+            struct_loaded: false,
             screenshot: screenshot.map(|path| ScreenshotJob {
                 path,
                 frames: 0,
@@ -608,14 +624,40 @@ impl ZeroApp {
                 ToastKind::Warn,
             );
         }
-        {
-
+        for notice in plugin_notices {
+            if notice.ok {
+                app.toast(
+                    format!("插件「{}」：{}", notice.plugin, notice.message),
+                    ToastKind::Info,
+                );
+            } else {
+                app.toast(
+                    format!("插件「{}」加载失败：{}", notice.plugin, notice.message),
+                    ToastKind::Warn,
+                );
+            }
         }
         app
     }
 
     pub fn is_attached(&self) -> bool {
         self.process.is_some()
+    }
+
+    /// Resolve an address expression (game.exe+0x4A0C8, a bare hex address,
+    /// or a pointer chain like game.exe+0x10,0x14,0x0) against the attached
+    /// process and its module list.
+    pub fn resolve_addr(&self, text: &str) -> Option<u64> {
+        crate::addr::resolve(self.process.as_deref(), &self.ptr_modules, text)
+    }
+
+    /// The same, but always requiring an attached process (pointer chains
+    /// dereference memory, so resolution without a process is impossible).
+    pub fn resolve_addr_attached(&self, text: &str) -> Option<u64> {
+        if !self.is_attached() {
+            return None;
+        }
+        self.resolve_addr(text)
     }
 
     pub fn ui_page(&mut self, ui: &mut egui::Ui) {
@@ -634,7 +676,36 @@ impl ZeroApp {
             Tab::Table => self.ui_table(ui),
             Tab::Speed => self.ui_speed(ui),
             Tab::Script => self.ui_script(ui),
+            Tab::Struct => self.ui_struct(ui),
         }
+    }
+
+    /// 推进自动更新状态机：到期检查、收后台消息、需要时让界面保持刷新。
+    pub fn poll_update(&mut self, ctx: &egui::Context) {
+        self.update.tick();
+        for note in self.update.poll() {
+            self.toast(note, ToastKind::Info);
+        }
+        if self.update.busy() {
+            ctx.request_repaint_after(Duration::from_millis(160));
+        }
+    }
+
+    /// 下载完成后：写更新脚本、退出，让脚本替换 exe 再启动新版。
+    pub fn apply_update(&mut self) -> bool {
+        if let update::State::Ready(path) = &self.update.state {
+            match update::install_and_restart(path) {
+                Ok(()) => {
+                    self.save_workspace();
+                    return true;
+                }
+                Err(e) => {
+                    self.update.state = update::State::Failed(e.clone());
+                    self.toast(format!("无法安装更新：{e}"), ToastKind::Error);
+                }
+            }
+        }
+        false
     }
 
     pub fn toast(&mut self, text: impl Into<String>, kind: ToastKind) {
@@ -947,8 +1018,8 @@ impl ZeroApp {
     }
 
     pub fn add_manual_entry(&mut self) {
-        let Some(address) = parse_address(&self.manual_address) else {
-            self.toast("地址格式不对，试试 0x1A2B3C 或十进制。", ToastKind::Warn);
+        let Some(address) = self.resolve_addr(&self.manual_address) else {
+            self.toast("地址格式不对：试试 0x1A2B3C、十进制，或 game.exe+0x4A0C8 这样的模块偏移。", ToastKind::Warn);
             return;
         };
         let value_text = if self.manual_value.trim().is_empty() {
@@ -1404,8 +1475,8 @@ impl ZeroApp {
         let Some(edit) = self.editing.take() else {
             return;
         };
-        let Some(address) = parse_address(&edit.address) else {
-            self.toast("地址格式不对。", ToastKind::Warn);
+        let Some(address) = self.resolve_addr(&edit.address) else {
+            self.toast("地址格式不对：试试 0x1A2B3C 或 game.exe+0x4A0C8。", ToastKind::Warn);
             self.editing = Some(edit);
             return;
         };
@@ -1484,6 +1555,70 @@ impl ZeroApp {
             self.mem_error = Some("这个地址无法读取（可能未提交或受保护）。".to_string());
             self.mem_loaded = false;
         }
+    }
+
+    /// Dissect the bytes behind an address expression into a structure view.
+    /// Uses the same expression syntax everywhere else accepts (module+offset,
+    /// bare hex, pointer chains).
+    pub fn struct_dissect(&mut self) {
+        let Some(handle) = self.process.clone() else {
+            self.struct_error = Some("先选择一个进程，再解读结构。".to_string());
+            return;
+        };
+        let Some(address) = self.resolve_addr(&self.struct_addr) else {
+            self.struct_error = Some("地址格式不对：试试 0x1A2B3C 或 game.exe+0x4A0C8。".to_string());
+            return;
+        };
+        match crate::structs::dissect(&handle, &self.ptr_modules, address, self.struct_size) {
+            Some(result) => {
+                self.struct_result = Some(result);
+                self.struct_error = None;
+                self.struct_loaded = true;
+            }
+            None => {
+                self.struct_error = Some("这个地址读不到（可能未提交或受保护）。".to_string());
+                self.struct_loaded = false;
+            }
+        }
+    }
+
+    /// Add one dissected field to the address list.
+    pub fn add_struct_field_to_list(&mut self, field_index: usize) {
+        let Some(result) = &self.struct_result else {
+            return;
+        };
+        let Some(field) = result.fields.get(field_index) else {
+            return;
+        };
+        let address = result.address.saturating_add(field.offset as u64);
+        let id = self.next_entry_id;
+        self.next_entry_id += 1;
+        let mut current = None;
+        let mut value_text = String::new();
+        if let Some(handle) = &self.process {
+            if let Some(vtype) = field.kind.vtype() {
+                current = read_value(handle, address, vtype);
+                if let Some(value) = &current {
+                    value_text = value.display();
+                }
+            }
+        }
+        let desc = if field.note.is_empty() {
+            format!("结构字段 +0x{:X}", field.offset)
+        } else {
+            format!("{} (+0x{:X})", field.note, field.offset)
+        };
+        self.entries.push(Entry {
+            id,
+            desc,
+            address,
+            vtype: field.kind.vtype().unwrap_or(VType::I32),
+            active: false,
+            value_text,
+            current,
+            previous: None,
+        });
+        self.toast("已把字段加入地址列表。", ToastKind::Success);
     }
 
     pub fn memory_read(&mut self) {
@@ -2805,6 +2940,7 @@ fn tab_tag(tab: Tab) -> &'static str {
         Tab::Table => "table",
         Tab::Speed => "speed",
         Tab::Script => "script",
+        Tab::Struct => "struct",
     }
 }
 
@@ -2887,6 +3023,7 @@ impl eframe::App for ZeroApp {
         self.tick_practice(ctx);
         self.tick_speed();
         self.tick_watch(ctx);
+        self.poll_update(ctx);
 
         self.handle_hotkey(ctx);
 
@@ -2901,7 +3038,7 @@ impl eframe::App for ZeroApp {
         self.ui_sidebar(ctx);
         self.ui_statusbar(ctx);
         egui::CentralPanel::default()
-            .frame(egui::Frame::none().fill(theme::BG))
+            .frame(egui::Frame::none().fill(theme::bg()))
             .show(ctx, |ui| {
                 theme::draw_background(ui);
                 let scroll_page = matches!(
@@ -2918,6 +3055,7 @@ impl eframe::App for ZeroApp {
                         | Tab::Table
                         | Tab::Speed
                         | Tab::Script
+                        | Tab::Struct
                 );
                 if scroll_page {
                     egui::ScrollArea::vertical()

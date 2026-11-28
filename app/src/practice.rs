@@ -19,6 +19,7 @@ struct Stats {
 impl PracticeApp {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
         theme::setup_fonts(&cc.egui_ctx);
+        theme::init();
         theme::apply_style(&cc.egui_ctx);
         Self {
             stats: Box::new(Stats {
@@ -51,9 +52,9 @@ impl PracticeApp {
                             egui::RichText::new(value)
                                 .size(34.0)
                                 .strong()
-                                .color(theme::TEXT),
+                                .color(theme::text()),
                         );
-                        ui.label(egui::RichText::new(unit).size(12.0).color(theme::FAINT));
+                        ui.label(egui::RichText::new(unit).size(12.0).color(theme::faint()));
                     });
                 });
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -67,7 +68,7 @@ impl PracticeApp {
                     });
                 });
             });
-            ui.label(egui::RichText::new(hint).size(11.5).color(theme::FAINT));
+            ui.label(egui::RichText::new(hint).size(11.5).color(theme::faint()));
         });
     }
 }
@@ -85,7 +86,7 @@ impl eframe::App for PracticeApp {
         egui::CentralPanel::default()
             .frame(
                 egui::Frame::none()
-                    .fill(theme::BG)
+                    .fill(theme::bg())
                     .inner_margin(egui::Margin::same(22.0)),
             )
             .show(ctx, |ui| {
@@ -98,7 +99,7 @@ impl eframe::App for PracticeApp {
                         ui.label(
                             egui::RichText::new("一个可以安全练习扫描的小程序")
                                 .size(12.0)
-                                .color(theme::MUTED),
+                                .color(theme::muted()),
                         );
                     });
                 });
@@ -107,7 +108,7 @@ impl eframe::App for PracticeApp {
                 ui.add_space(6.0);
 
                 let total = self.stats.health as f64 + self.stats.ammo as f64 + self.stats.coins as f64;
-                theme::card().show(ui, |ui| {
+                theme::card_frame().show(ui, |ui| {
                     ui.horizontal(|ui| {
                         ui.vertical(|ui| {
                             theme::section_label(ui, "当前状态");
@@ -115,9 +116,9 @@ impl eframe::App for PracticeApp {
                                 egui::RichText::new(format!("{:.0}", total))
                                     .size(30.0)
                                     .strong()
-                                    .color(theme::ACCENT_2),
+                                    .color(theme::accent_2()),
                             );
-                            ui.label(egui::RichText::new("这是靶场自己的内存，随便改。").size(11.5).color(theme::FAINT));
+                            ui.label(egui::RichText::new("这是靶场自己的内存，随便改。").size(11.5).color(theme::faint()));
                         });
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             ui.checkbox(&mut self.auto, "自动变化");
@@ -200,7 +201,7 @@ impl eframe::App for PracticeApp {
                                 egui::RichText::new(format!("{:.2}", self.stats.armor))
                                     .size(30.0)
                                     .strong()
-                                    .color(theme::ACCENT),
+                                    .color(theme::accent()),
                             );
                         });
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -219,10 +220,10 @@ impl eframe::App for PracticeApp {
                 });
 
                 ui.add_space(10.0);
-                theme::card().show(ui, |ui| {
+                theme::card_frame().show(ui, |ui| {
                     theme::section_label(ui, "操作记录");
                     for line in self.log.iter().rev().take(4) {
-                        ui.label(egui::RichText::new(format!("· {line}")).size(12.0).color(theme::MUTED));
+                        ui.label(egui::RichText::new(format!("· {line}")).size(12.0).color(theme::muted()));
                     }
                 });
 
@@ -230,7 +231,7 @@ impl eframe::App for PracticeApp {
                 ui.label(
                     egui::RichText::new("提示：扫描时请选择本窗口的进程；数值变化后再回 Zero 用「数值减少 / 增加」再次扫描。")
                         .size(11.5)
-                        .color(theme::FAINT),
+                        .color(theme::faint()),
                 );
             });
     }

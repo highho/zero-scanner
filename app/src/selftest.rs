@@ -972,6 +972,58 @@ pub fn run() -> bool {
         log.push_str("FAIL  kernel32.dll not found\n");
     }
 
+    // Address expressions and runtime theme engine (game-scenario + theming).
+    {
+        use crate::addr;
+        let fake_modules = vec![winmem::ModuleInfo {
+            name: "game.exe".to_string(),
+            base: 0x1000,
+            size: 0x10000,
+        }];
+        check!(
+            addr::resolve(None, &fake_modules, "game.exe+0x4A0C8") == Some(0x4B0C8),
+            "addr: module+offset resolves (game.exe+0x4A0C8 -> 0x4B0C8)"
+        );
+        check!(
+            addr::resolve(None, &fake_modules, "0x1234") == Some(0x1234),
+            "addr: bare hex resolves"
+        );
+        check!(
+            addr::resolve(None, &fake_modules, "12345") == Some(12345),
+            "addr: decimal resolves"
+        );
+        check!(
+            addr::annotate(&fake_modules, 0x1234) == "game.exe+0x234",
+            "addr: annotate produces module+offset"
+        );
+        check!(
+            addr::looks_like_module("UnityPlayer.dll"),
+            "addr: dll name detected as module"
+        );
+        check!(
+            !addr::looks_like_module("0x1234"),
+            "addr: pure hex is not a module name"
+        );
+        let themes = crate::theme::themes();
+        check!(
+            themes.len() >= 7,
+            "theme: {} built-in presets available",
+            themes.len()
+        );
+        check!(
+            crate::theme::themes().iter().any(|t| t.id == "midnight"),
+            "theme: default midnight preset present"
+        );
+        check!(
+            crate::theme::themes().iter().any(|t| !t.dark),
+            "theme: at least one light palette (daylight)"
+        );
+        check!(
+            crate::structs::FieldKind::I32.size() == 4,
+            "structs: I32 field size is 4"
+        );
+    }
+
     log.push_str(if ok { "\nRESULT: PASS\n" } else { "\nRESULT: FAIL\n" });
     std::fs::write("selftest.log", log).ok();
     ok

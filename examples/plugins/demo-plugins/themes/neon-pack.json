@@ -1,0 +1,11 @@
+{
+  "id": "neo2",
+  "name": "霓虹二号",
+  "description": "插件自带的主题包，通过插件清单注册。",
+  "base": "neon",
+  "dark": true,
+  "colors": {
+    "accent": "#7cffcb",
+    "accent_2": "#ff7ac8"
+  }
+}

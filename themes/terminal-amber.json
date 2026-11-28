@@ -1,0 +1,22 @@
+{
+  "id": "terminal-amber",
+  "name": "终端琥珀",
+  "description": "主题包示例：琥珀色终端风，降低蓝光。",
+  "base": "ember",
+  "dark": true,
+  "colors": {
+    "bg": "#0c0a06",
+    "bg_top": "#141007",
+    "panel": "#100c07",
+    "sidebar": "#0b0905",
+    "card": "#191207",
+    "card_hi": "#221a0c",
+    "card_soft": "#121009",
+    "border": "#4a3416",
+    "border_soft": "#2c2110",
+    "accent": "#ffb454",
+    "accent_2": "#98c379",
+    "warn": "#e5c07b",
+    "success": "#a3d977"
+  }
+}

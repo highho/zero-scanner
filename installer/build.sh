@@ -18,5 +18,13 @@ command -v makensis >/dev/null 2>&1 || {
   exit 1
 }
 
+# NSIS 只有在文件带 UTF-8 BOM 时才按 UTF-8 解析；缺了会把中文读成乱码并直接报
+# "Bad text encoding"（编辑器/脚本改过这个文件很容易把 BOM 弄丢），这里自动补上。
+if [ "$(head -c 3 installer/Zero.nsi | od -An -tx1 | tr -d ' \n')" != "efbbbf" ]; then
+  echo "installer/Zero.nsi 缺少 UTF-8 BOM，自动补上"
+  { printf '\xef\xbb\xbf'; cat installer/Zero.nsi; } > installer/Zero.nsi.tmp
+  mv installer/Zero.nsi.tmp installer/Zero.nsi
+fi
+
 makensis -V2 installer/Zero.nsi
 ls -la "$OUT"

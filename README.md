@@ -11,11 +11,11 @@
 [![Platform](https://img.shields.io/badge/platform-Windows%2010%2F11%20x64-0078D6?style=flat-square&logo=windows11&logoColor=white)](#下载)
 [![Rust](https://img.shields.io/badge/Rust-2021-000000?style=flat-square&logo=rust&logoColor=white)](#从源码构建)
 [![egui](https://img.shields.io/badge/egui-0.27-1f4257?style=flat-square)](#架构)
-[![Single file](https://img.shields.io/badge/单文件-6.4%20MB-2ea44f?style=flat-square)](#下载)
+[![Single file](https://img.shields.io/badge/单文件-6.9%20MB-2ea44f?style=flat-square)](#下载)
 [![Offline](https://img.shields.io/badge/推理-本机-brightgreen?style=flat-square)](#智能化闭环)
 [![License](https://img.shields.io/badge/license-MIT-2ea44f?style=flat-square)](LICENSE)
 
-[下载](#下载) · [界面](#界面) · [快速上手](#快速上手) · [功能](#功能) · [MCP 服务](#给-ai-用mcp-服务) · [架构](#架构) · [构建](#从源码构建) · [安全原则](#安全原则) · [许可证](#许可证)
+[下载](#下载) · [界面](#界面) · [自动更新](#自动更新) · [快速上手](#快速上手) · [功能](#功能) · [MCP 服务](#给-ai-用mcp-服务) · [架构](#架构) · [构建](#从源码构建) · [安全原则](#安全原则) · [许可证](#许可证)
 
 </div>
 
@@ -25,11 +25,12 @@
 
 | 文件 | 说明 |
 | --- | --- |
-| [`zero-scanner-1.0.0-setup-x64.exe`](https://github.com/highho/zero-scanner/releases/latest) | 安装版：**不需要管理员权限**，装进用户目录，带桌面 / 开始菜单快捷方式与卸载项 |
+| [`zero-scanner-1.1.0-setup-x64.exe`](https://github.com/highho/zero-scanner/releases/latest) | 安装版：**不需要管理员权限**，装进用户目录，带桌面 / 开始菜单快捷方式与卸载项 |
 | [`zero-scanner.exe`](https://github.com/highho/zero-scanner/releases/latest) | 便携版，单文件，双击即用 |
-| [`zero-scanner-v1.0.0-windows.zip`](https://github.com/highho/zero-scanner/releases/latest) | 同一份 exe + 说明文档与界面截图 |
+| [`zero-scanner-v1.1.0-windows.zip`](https://github.com/highho/zero-scanner/releases/latest) | 同一份 exe + 说明文档与界面截图 |
 
 - **三种拿法，一个二进制**：便携版直接跑；zip 解压即用；安装版会装到 `%LOCALAPPDATA%\Programs\Zero`，写开始菜单和桌面快捷方式，卸载时**保留你的 `zero-workspace.json`**（地址列表、补丁记录都在里面）。
+- **会自己更新**：装好之后，程序启动时自己检查新版本，一键下载替换、重启生效（走 `gh-proxy.com` 镜像，见 [自动更新](#自动更新)）。
 - **无外部运行时**：Lua 5.4 通过 `mlua` 的 vendored feature 静态编进二进制，不需要另装 Lua，也不用装任何运行库。
 - **只支持 Windows 10 / 11 x64**。
 - 权限要跟得上目标：游戏以管理员身份运行时，Zero 也要以管理员身份运行，否则打不开进程。
@@ -48,7 +49,11 @@
 
 ## 界面
 
-三张图都是 `--demo` 模式下的真实渲染，进程是内置练习靶场，不是摆拍。
+<img src="docs/icon.png" width="96" align="right" alt="Zero 图标">
+
+图标和界面同一套语言：深色圆角砖、渐变 Z、外围一圈扫描环——「找一个值，然后盯住它」。
+
+下面几张图都是 `--demo` 模式下的真实渲染，进程是内置练习靶场，不是摆拍。
 
 **扫描**——左边是工作区，右边是智能建议：候选越少，它越想帮你收口。
 
@@ -61,6 +66,55 @@
 **内存浏览**——十六进制直读目标进程，看到的每个字节都是真的。
 
 ![内存浏览](docs/memory.png)
+
+**设置**——扫描偏好、MCP 服务和自动更新都在这里，更新卡片会直接写出目标版本、体积和发布说明。
+
+![设置](docs/settings.png)
+
+**主题**——设置里一键切换 8 套内置主题；界面颜色全部来自运行时调色板，浅色深色都有。
+
+![主题设置](docs/settings-themes.png)
+
+## 主题与插件
+
+Zero 1.2 把界面颜色从编译期常量换成了**运行时主题引擎**：
+
+| 能力 | 说明 |
+| --- | --- |
+| 8 套内置主题 | 深空蓝（默认）/ 霓虹赛博 / 电竞紫 / 战术绿 / 暗夜琥珀 / 极光冰蓝 / 石墨灰 / 晨曦（浅色） |
+| 主题包 | `%APPDATA%/Zero/themes/*.json`，继承内置主题再覆盖任意颜色，改完点「重新扫描」即生效 |
+| 插件预留 | `%APPDATA%/Zero/plugins/<名>/plugin.json` 声明能力；目前已实现 `theme`（插件自带主题包），其余键安全忽略 |
+| 命令行 | `--theme=<id>` 直接用指定主题启动；选择会记在 `%APPDATA%/Zero/prefs.json` |
+
+格式细节与示例见 [docs/themes.md](docs/themes.md) 与 [docs/plugins.md](docs/plugins.md)；仓库里带了两个可用的主题包（[themes/](themes/)）和一个演示插件（[examples/plugins/](examples/plugins/)）。失败的包只会被跳过并在设置里列出原因，不会挡住启动。
+
+## 自动更新
+
+装好之后不用再手动下安装包：程序启动时自己查一次新版本，有就提示、下载、替换、重启，全程不弹 UAC。
+
+| 环节 | 做法 |
+| --- | --- |
+| 查什么 | \`GET https://gh-proxy.com/https://api.github.com/repos/highho/zero-scanner/releases/latest\`，只读 tag、发布说明和资产清单 |
+| 比什么 | 三段版本号数字比较，\`v1.1.0\` 与 \`1.1.0\` 等价；只认比当前版本更大的发布 |
+| 下载哪个 | 优先裸 \`zero-scanner.exe\`（就地替换，不跑安装器），没有就退回 \`*-setup-x64.exe\` |
+| 什么时候查 | 启动后自动查一次，之后最多每 6 小时一次；也可以随时点「检查更新」 |
+| 下载到哪 | \`%TEMP%\zero-update\`，先写 \`.part\`，字节数与发布信息对得上才改成正式文件 |
+| 怎么换 | 生成一个 \`apply.cmd\`：等本进程退出 → \`move /Y\` 覆盖安装目录里的 exe → 启动新版 → 删掉自己 |
+| 不想升 | 「跳过此版本」只压住这一个版本，下个版本还会提醒 |
+
+几个刻意的选择：
+
+- **镜像可换**：默认走 \`gh-proxy.com\`（国内直连 GitHub 常常超时）。常量在 \`app/src/update.rs\`，改一个 \`PROXY\` 就行，留空则直连。
+- **不加依赖**：HTTP 走 Windows 自带的 WinHTTP（\`windows-sys\` 已经在依赖里），没有引入 \`reqwest\` 之类的运行时；顺便处理了本机证书吊销检查离线的情况——严格握手失败时，带 \`SECURITY_FLAG_IGNORE_REVOCATION\` 再试一次。
+- **失败不吵人**：自动检查连不上就安静地跳过，只有手动检查失败才提示原因，界面里也不会冒出更新失败的弹窗。
+- **只读不报**：更新链路只从 GitHub 读版本和文件，不上报任何信息，不做统计。
+
+自检命令（不打开界面，直接打印结论）：
+
+\`\`\`bash
+zero-scanner.exe --update-check              # current=1.1.0 latest=已是最新
+zero-scanner.exe --update-download <目录>     # 真的走一遍下载，把文件放到指定目录
+\`\`\`
 
 ## 功能
 
@@ -80,8 +134,10 @@
 | --- | --- |
 | 符号解析 | 模块列表 + PE 导入表 / 导出表 |
 | 内存浏览 | 按模块分区查看、跳转、跟随指针 |
+| 结构浏览 | 把一块内存按字段拆开，猜每个偏移是指针 / 整数 / 浮点 / 文本，一键把字段加进地址列表 |
 | 反汇编 | 自带 x86-64 反汇编器，指令边界与长度精确到字节 |
 | 命中分诊 | 每个候选都带**可解释**的打分理由（是否可写、是否落在模块内、被引用的次数……），不是黑箱分数 |
+| 地址表达式 | 所有地址输入框都认 `game.exe+0x4A0C8` 模块偏移、指针链 `game.exe+0x10,0x14`、十六进制与十进制 |
 
 ### 修改（全部可还原）
 
@@ -105,7 +161,7 @@
 
 | 功能 | 说明 |
 | --- | --- |
-| 14 个工作区 | 扫描 / 地址列表 / 内存浏览 / 智能助手 / 练习靶场 / 指针扫描 / AOB 扫描 / 符号解析 / 反汇编 / 代码补丁 / 自动汇编 / CT 表格 / 变速齿轮 / Lua 脚本 |
+| 15 个工作区 | 扫描 / 地址列表 / 内存浏览 / 智能助手 / 练习靶场 / 指针扫描 / AOB 扫描 / 符号解析 / 反汇编 / 代码补丁 / 自动汇编 / CT 表格 / 变速齿轮 / Lua 脚本 / 结构浏览 |
 | 工作区持久化 | 地址列表、补丁记录、观察候选与设置存在 exe 旁的 `zero-workspace.json`；文件损坏时降级为空，不会挡住启动 |
 | 快捷键 | 沿用 CE 的肌肉记忆：F5 再次扫描、Ctrl+Z 撤销、Ctrl+F 全部锁定……F1 呼出速查 |
 
@@ -190,15 +246,17 @@ MCP listening on http://127.0.0.1:3780/mcp?token=9f2c1d...（32 位随机串）
 | --- | --- |
 | `zero-scanner.exe` | 图形界面 |
 | `zero-scanner.exe --mcp <port>` | 无界面启动 MCP 服务（不写端口默认 3777） |
-| `zero-scanner.exe --selftest` | 跑 109 项自检，结论写 `selftest.log`，退出码即结果 |
+| `zero-scanner.exe --selftest` | 跑 119 项自检，结论写 `selftest.log`，退出码即结果 |
 | `zero-scanner.exe --verify <pid>` | 对目标进程做 8 项可用性验证 |
 | `zero-scanner.exe --e2e <pid> [info]` | 23 项端到端验证（配合 `e2e_target.py`） |
-| `zero-scanner.exe --screenshot <png> --tab <名字>` | 渲染某个页面为 PNG（界面回归用） |
+| `zero-scanner.exe --screenshot <png> --tab <名字>` | 渲染某个页面为 PNG（界面回归用，加 `--settings` 连设置弹窗一起） |
+| `zero-scanner.exe --update-check` | 查最新发布并打印结论，不打开界面 |
+| `zero-scanner.exe --update-download <目录>` | 走一遍真实下载，落到指定目录（校验用） |
 | `zero-scanner.exe --hotkeys` | 启动时展开快捷键速查 |
 | `zero-scanner.exe --settings` | 启动时展开设置 |
 | `zero-scanner.exe --practice-target` | 只跑内置靶场进程 |
 
-`--tab` 取值：`scan` `list` `memory` `assistant` `practice` `ptr` `aob` `symbols` `disasm` `inject` `asm` `table` `speed` `script`。
+`--tab` 取值：`scan` `list` `memory` `assistant` `practice` `ptr` `aob` `symbols` `disasm` `inject` `asm` `table` `speed` `script` `struct`。
 
 ## 快捷键
 
@@ -280,15 +338,19 @@ cargo build --release
 
 仓库里提交了 `Cargo.lock`，构建结果是可复现的。第一次构建要编 vendored Lua，会比之后慢一些。
 
+`build.rs` 会在构建时用 Windows SDK 的 `rc.exe` 把图标（`app/icon/zero.ico`）和版本信息嵌进 exe——找不到 `rc.exe` 只给一条警告，不影响编译，只是产物没有图标和版本号。图标在窗口里用的是 `app/assets/icon.png`。
+
+版本号要改两处：`app/Cargo.toml` 的 `version`（exe 版本信息、MCP 的 `serverInfo`、界面里的「当前 v…」都读它）和 `installer/Zero.nsi` 的 `APP_VERSION`（安装包文件名和卸载项显示）。
+
 打包成安装程序（可选，需要 [NSIS](https://nsis.sourceforge.io/Download) 3.x 的 `makensis` 在 `PATH` 上）：
 
 ```bash
 cp app/target/release/zero-scanner.exe dist/
 bash installer/build.sh
-# 产物：dist/zero-scanner-1.0.0-setup-x64.exe
+# 产物：dist/zero-scanner-1.1.0-setup-x64.exe
 ```
 
-安装逻辑在 [`installer/Zero.nsi`](installer/Zero.nsi)（版本号在这里改），图标是 [`installer/zero.ico`](installer/zero.ico)。安装包默认装到用户目录、申请的是用户级权限，所以整个流程不用弹 UAC。
+安装逻辑在 [`installer/Zero.nsi`](installer/Zero.nsi)（版本号在这里改），图标是 [`installer/zero.ico`](installer/zero.ico)（与 `app/icon/zero.ico` 是同一份文件）。安装包默认装到用户目录、申请的是用户级权限，所以整个流程不用弹 UAC。
 
 ## 测试与验证
 

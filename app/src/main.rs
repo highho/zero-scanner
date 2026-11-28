@@ -1,6 +1,7 @@
 #![windows_subsystem = "windows"]
 
 mod aob;
+mod addr;
 mod assembler;
 mod ctable;
 mod app;
@@ -13,16 +14,20 @@ mod lua;
 mod mcp;
 mod model;
 mod pointerscan;
+mod plugins;
 mod practice;
+mod prefs;
 mod scan;
 mod selftest;
 mod session;
 mod smart;
 mod speed;
+mod structs;
 mod syms;
 mod theme;
 mod triage;
 mod ui;
+mod update;
 mod winmem;
 
 use app::{Tab, ZeroApp};
@@ -90,6 +95,54 @@ fn main() -> eframe::Result<()> {
             }
         }
     }
+    if args.iter().any(|a| a == "--update-check") {
+        // Headless: query the latest release through the mirror and report.
+        match update::cli_check() {
+            Ok(line) => {
+                println!("{line}");
+                std::process::exit(0);
+            }
+            Err(error) => {
+                eprintln!("{error}");
+                std::process::exit(1);
+            }
+        }
+    }
+    if let Some(pos) = args.iter().position(|a| a == "--update-download") {
+        let dir = args
+            .get(pos + 1)
+            .map(PathBuf::from)
+            .unwrap_or_else(std::env::temp_dir);
+        match update::cli_download(&dir) {
+            Ok(line) => {
+                println!("{line}");
+                std::process::exit(0);
+            }
+            Err(error) => {
+                eprintln!("{error}");
+                std::process::exit(1);
+            }
+        }
+    }
+    if args.iter().any(|a| a == "--update-apply") {
+        // Headless: download the newest build and swap this exe out of the way.
+        // Used to verify the replace-and-restart path end to end.
+        let (tx, _rx) = std::sync::mpsc::channel();
+        let result = update::fetch_release()
+            .and_then(|maybe| maybe.ok_or_else(|| "已是最新，没有可下载的版本".to_string()))
+            .and_then(|release| update::download_for_cli(&release, tx))
+            .and_then(|path| update::install_and_restart(&path));
+        match result {
+            Ok(()) => {
+                println!("update queued, exiting");
+                std::process::exit(0);
+            }
+            Err(error) => {
+                eprintln!("{error}");
+                std::process::exit(1);
+            }
+        }
+    }
     if args.iter().any(|a| a == "--selftest") {
         let ok = selftest::run();
         std::process::exit(if ok { 0 } else { 1 });
@@ -126,6 +179,7 @@ fn main() -> eframe::Result<()> {
     let show_hotkeys = args.iter().any(|a| a == "--hotkeys");
     let show_settings = args.iter().any(|a| a == "--settings");
     let initial_tab = parse_tab(&args);
+    let boot_theme = parse_theme(&args);
     eframe::run_native(
         "Zero",
         options,
@@ -133,6 +187,10 @@ fn main() -> eframe::Result<()> {
             let mut app = ZeroApp::new(cc, path.clone(), initial_tab, demo);
             app.show_hotkeys = show_hotkeys;
             app.show_settings = show_settings;
+            if let Some(theme_id) = &boot_theme {
+                crate::theme::set_theme(theme_id);
+                crate::theme::apply_style(&cc.egui_ctx);
+            }
             Box::new(app)
         }),
     )
@@ -162,8 +220,25 @@ fn parse_tab(args: &[String]) -> Option<Tab> {
                 "table" | "ct" => Some(Tab::Table),
                 "speed" => Some(Tab::Speed),
                 "script" | "lua" => Some(Tab::Script),
+                "struct" | "dissect" => Some(Tab::Struct),
                 _ => Some(Tab::Scan),
             };
+        }
+        i += 1;
+    }
+    None
+}
+
+fn parse_theme(args: &[String]) -> Option<String> {
+    let mut i = 0;
+    while i < args.len() {
+        if args[i] == "--theme" {
+            if let Some(value) = args.get(i + 1) {
+                return Some(value.clone());
+            }
+        }
+        if let Some(value) = args[i].strip_prefix("--theme=") {
+            return Some(value.to_string());
         }
         i += 1;
     }
@@ -189,47 +264,21 @@ fn parse_screenshot(args: &[String]) -> Option<PathBuf> {
 }
 
 fn app_icon() -> egui::IconData {
-    let size = 64usize;
-    let mut rgba = vec![0u8; size * size * 4];
-    for y in 0..size {
-        for x in 0..size {
-            let t = (x + y) as f32 / (2.0 * size as f32);
-            let r = (92.0 + (52.0 - 92.0) * t) as u8;
-            let g = (140.0 + (211.0 - 140.0) * t) as u8;
-            let b = (255.0 + (190.0 - 255.0) * t) as u8;
-            let edge = {
-                let cx = x as f32 - 31.5;
-                let cy = y as f32 - 31.5;
-                let d = (cx * cx + cy * cy).sqrt();
-                if d > 30.0 {
-                    0
-                } else if d > 28.5 {
-                    180
-                } else {
-                    255
-                }
-            };
-            let idx = (y * size + x) * 4;
-            rgba[idx] = r;
-            rgba[idx + 1] = g;
-            rgba[idx + 2] = b;
-            rgba[idx + 3] = edge;
-            let in_z = (x as i32 - y as i32).abs() < 5
-                && x > 17
-                && x < 47
-                && y > 17
-                && y < 47;
-            if in_z && edge > 0 {
-                rgba[idx] = 9;
-                rgba[idx + 1] = 18;
-                rgba[idx + 2] = 29;
-                rgba[idx + 3] = 255;
+    const PNG: &[u8] = include_bytes!("../assets/icon.png");
+    match image::load_from_memory_with_format(PNG, image::ImageFormat::Png) {
+        Ok(img) => {
+            let img = img.to_rgba8();
+            let (width, height) = img.dimensions();
+            egui::IconData {
+                rgba: img.into_raw(),
+                width,
+                height,
             }
         }
-    }
-    egui::IconData {
-        rgba,
-        width: size as u32,
-        height: size as u32,
+        Err(_) => egui::IconData {
+            rgba: vec![0, 0, 0, 0],
+            width: 1,
+            height: 1,
+        },
     }
 }

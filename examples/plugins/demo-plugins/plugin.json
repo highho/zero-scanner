@@ -1,0 +1,6 @@
+{
+  "name": "demo-plugins",
+  "version": "0.1.0",
+  "description": "演示插件：只是注册一个主题包，验证插件目录契约。",
+  "theme": "themes/neon-pack.json"
+}

@@ -1,0 +1,19 @@
+{
+  "id": "candy-pop",
+  "name": "糖果汽水",
+  "description": "主题包示例：在深空蓝基础上换一组明快的糖果色。",
+  "base": "midnight",
+  "dark": true,
+  "colors": {
+    "accent": "#ff6bc1",
+    "accent_2": "#4de3ff",
+    "accent_dark": "#d63384",
+    "warn": "#ffd166",
+    "danger": "#ff5c8a",
+    "success": "#4ade80",
+    "glow_a": "#ff6bc1",
+    "glow_b": "#4de3ff",
+    "logo_a": "#ff6bc1",
+    "logo_b": "#4de3ff"
+  }
+}
