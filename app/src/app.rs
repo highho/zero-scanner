@@ -131,6 +131,11 @@ pub struct ZeroApp {
     pub scan_elapsed: Duration,
     pub scan_truncated: bool,
     pub scan_cancelled: bool,
+    /// How the last scan was actually carried out: worker count and bytes
+    /// walked. Shown next to the elapsed time so a slow scan is explainable
+    /// (one thread on a huge region set reads very differently from eight).
+    pub scan_threads: usize,
+    pub scan_bytes: u64,
     pub hits: Vec<ScanHit>,
     pub hit_history: Vec<Vec<ScanHit>>,
     pub selected_hit: Option<usize>,
@@ -336,6 +341,8 @@ impl ZeroApp {
             scan_elapsed: Duration::ZERO,
             scan_truncated: false,
             scan_cancelled: false,
+            scan_threads: 0,
+            scan_bytes: 0,
             hits: Vec::new(),
             hit_history: Vec::new(),
             selected_hit: None,
@@ -504,6 +511,9 @@ impl ZeroApp {
             app.selected_hit = Some(0);
             app.last_scan_kind = "首次 · 精确值".to_string();
             app.scan_phase = ScanPhase::Done;
+            app.scan_elapsed = Duration::from_millis(412);
+            app.scan_threads = 8;
+            app.scan_bytes = 96 * 1024 * 1024;
             app.ptr_paths = vec![
                 pointerscan::PointerPath {
                     base: pointerscan::StaticBase {
@@ -1009,6 +1019,8 @@ impl ZeroApp {
                 self.scan_elapsed = Duration::ZERO;
                 self.scan_truncated = false;
                 self.scan_cancelled = false;
+                self.scan_threads = 0;
+                self.scan_bytes = 0;
                 self.hits.clear();
                 self.hit_history.clear();
                 self.selected_hit = None;
@@ -1059,6 +1071,8 @@ impl ZeroApp {
                 self.scan_elapsed = Duration::ZERO;
                 self.scan_truncated = false;
                 self.scan_cancelled = false;
+                self.scan_threads = 0;
+                self.scan_bytes = 0;
                 self.last_scan_kind = format!("再次 · {}", self.scan_type.label());
             }
             Err(e) => {
@@ -1098,6 +1112,8 @@ impl ZeroApp {
             self.scan_elapsed = result.elapsed;
             self.scan_truncated = result.truncated;
             self.scan_cancelled = result.cancelled;
+            self.scan_threads = result.threads;
+            self.scan_bytes = result.scanned_bytes;
             self.scan_phase = if result.error.is_some() {
                 ScanPhase::Failed
             } else {
@@ -1134,9 +1150,10 @@ impl ZeroApp {
                 };
                 self.toast(
                     format!(
-                        "扫描完成：{count} 个地址{}{hint}，用时 {:.2}s",
+                        "扫描完成：{count} 个地址{}{hint}，用时 {:.2}s · {}",
                         suffix,
-                        self.scan_elapsed.as_secs_f32()
+                        self.scan_elapsed.as_secs_f32(),
+                        crate::scan::perf_text(self.scan_threads, self.scan_bytes, self.scan_elapsed)
                     ),
                     ToastKind::Success,
                 );

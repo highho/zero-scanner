@@ -42,6 +42,12 @@ impl Report {
         std::fs::write("e2e.log", &self.log).ok();
     }
 
+    /// Record a measured number the run wants on the record, pass or fail.
+    fn note(&mut self, label: &str, detail: &str) {
+        self.log.push_str(&format!("NOTE  {label}: {detail}\n"));
+        std::fs::write("e2e.log", &self.log).ok();
+    }
+
     /// Mark a stage as started, so a hang can be localised.
     fn stage(&mut self, label: &str) {
         self.log.push_str(&format!("....  {label}\n"));
@@ -118,10 +124,16 @@ pub fn run(pid: u32, info_path: &str) -> bool {
                 let done = scan_handle.rx.recv_timeout(std::time::Duration::from_secs(120)).unwrap_or_else(|_| scan::ScanDone {
                     hits: Vec::new(), elapsed: std::time::Duration::ZERO,
                     truncated: false, cancelled: true, error: Some("timeout".to_string()),
+                    threads: 0, scanned_bytes: 0,
                 });
                 report.check(done.hits.iter().any(|h| h.address == address),
                     "value scan finds the target's address",
                     || format!("{} hits, target at {address:X} not among them", done.hits.len()));
+                // The scan must report how it actually ran, not just what it found.
+                report.check(done.threads > 0 && done.scanned_bytes > 0,
+                    "value scan reports the threads and bytes it used",
+                    || format!("{} threads, {} bytes", done.threads, done.scanned_bytes));
+                report.note("scan throughput", &scan::perf_text(done.threads, done.scanned_bytes, done.elapsed));
             }
             Err(e) => report.check(false, "value scan starts", || e),
         }

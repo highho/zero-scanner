@@ -3,6 +3,7 @@ use crate::debugger::{self, DebugSession, BpKind, Slot};
 use crate::model::{format_bytes, parse_address, ScanType, VType};
 use crate::disasm;
 use crate::hotkey;
+use crate::scan;
 use crate::triage;
 use crate::smart::{self, Preset};
 use crate::speed;
@@ -1146,6 +1147,13 @@ impl ZeroApp {
                 }
                 if self.scan_truncated {
                     theme::tag(ui, "已达上限", theme::warn());
+                }
+                if self.scan_threads > 0 && self.scan_phase != ScanPhase::Running {
+                    theme::tag(
+                        ui,
+                        &scan::perf_text(self.scan_threads, self.scan_bytes, self.scan_elapsed),
+                        theme::faint(),
+                    );
                 }
                 if !self.ranked.is_empty() {
                     let strong = triage::strong_count(&self.ranked);

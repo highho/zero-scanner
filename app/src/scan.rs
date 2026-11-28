@@ -30,6 +30,10 @@ pub struct ScanDone {
     pub truncated: bool,
     pub cancelled: bool,
     pub error: Option<String>,
+    /// How many worker threads actually ran, and how many bytes they walked.
+    /// The pair turns "the scan feels slow" into a number the user can act on.
+    pub threads: usize,
+    pub scanned_bytes: u64,
 }
 
 struct Target {
@@ -54,6 +58,26 @@ fn thread_count() -> usize {
         .map(|n| n.get())
         .unwrap_or(4)
         .clamp(1, 8)
+}
+
+/// One-line "N 线程 · X MB/s" tail for a finished scan. Bytes are 0 for a
+/// repeat scan (it only revisits addresses it already found), so that half is
+/// left out instead of printed as a fake zero.
+pub fn perf_text(threads: usize, bytes: u64, elapsed: Duration) -> String {
+    let mut text = format!("{threads} 线程");
+    let secs = elapsed.as_secs_f64();
+    if bytes > 0 && secs > 0.000_5 {
+        let mbps = bytes as f64 / 1_048_576.0 / secs;
+        text.push_str(&format!(" · {mbps:.0} MB/s"));
+    }
+    text
+}
+
+/// How many worker threads a scan of this many bytes will actually use. A
+/// small region set does not need eight threads: one thread per region is
+/// enough, and the caller shows this so a slow scan can be explained.
+pub fn planned_threads(regions: &[Region]) -> usize {
+    thread_count().min(regions.len()).max(1)
 }
 
 pub fn start_first_scan(
@@ -135,6 +159,7 @@ pub fn start_first_scan(
         .name("zero-scan".to_string())
         .spawn(move || {
             let n = thread_count();
+            let total_bytes: u64 = regions.iter().map(|r| r.size).sum();
             let mut buckets: Vec<Vec<Region>> = (0..n).map(|_| Vec::new()).collect();
             let mut load = vec![0u64; n];
             for region in regions {
@@ -143,10 +168,12 @@ pub fn start_first_scan(
                 buckets[idx].push(region);
             }
             let mut joins = Vec::new();
+            let mut threads = 0usize;
             for bucket in buckets {
                 if bucket.is_empty() {
                     continue;
                 }
+                threads += 1;
                 let handle = handle.clone();
                 let targets = targets.clone();
                 let progress = progress_thread.clone();
@@ -197,6 +224,8 @@ pub fn start_first_scan(
                 truncated,
                 cancelled: cancel_thread.load(Ordering::Relaxed),
                 error: None,
+                threads,
+                scanned_bytes: total_bytes,
             });
         })
         .map_err(|e| format!("无法启动扫描线程：{e}"))?;
@@ -422,11 +451,13 @@ pub fn start_next_scan(
             let hits = Arc::new(hits);
             let targets = Arc::new(targets);
             let mut joins = Vec::new();
+            let mut threads = 0usize;
             for i in 0..n {
                 let start = i * per;
                 if start >= hits.len() {
                     break;
                 }
+                threads += 1;
                 let end = ((i + 1) * per).min(hits.len());
                 let handle = handle.clone();
                 let hits = hits.clone();
@@ -480,6 +511,8 @@ pub fn start_next_scan(
                 truncated: false,
                 cancelled: cancel_thread.load(Ordering::Relaxed),
                 error: None,
+                threads,
+                scanned_bytes: 0,
             });
         })
         .map_err(|e| format!("无法启动扫描线程：{e}"))?;

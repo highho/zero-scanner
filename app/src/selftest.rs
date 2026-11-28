@@ -1886,6 +1886,46 @@ pub fn run() -> bool {
         }
     }
 
+    // Scan throughput must be a number, not a vibe: a region set smaller than
+    // the thread budget must not pretend to use eight workers, and the perf
+    // line must report a real rate for a real byte count.
+    {
+        let one = crate::model::Region {
+            base: 0x1000,
+            size: 4096,
+            writable: true,
+            executable: false,
+        };
+        check!(
+            crate::scan::planned_threads(&[one.clone()]) == 1,
+            "scan: a single region is scanned by one thread ({} threads)",
+            crate::scan::planned_threads(&[one])
+        );
+        let many: Vec<crate::model::Region> = (0..32)
+            .map(|i| crate::model::Region {
+                base: 0x1000 * (i + 1),
+                size: 4096,
+                writable: true,
+                executable: false,
+            })
+            .collect();
+        let planned = crate::scan::planned_threads(&many);
+        check!(
+            planned > 1 && planned <= 8,
+            "scan: many regions are spread over several threads ({planned} threads)"
+        );
+        let text = crate::scan::perf_text(4, 64 * 1024 * 1024, std::time::Duration::from_millis(320));
+        check!(
+            text.contains("4 线程") && text.contains("MB/s"),
+            "scan: the perf line states threads and throughput ({text})"
+        );
+        let repeat = crate::scan::perf_text(2, 0, std::time::Duration::from_millis(5));
+        check!(
+            repeat.contains("2 线程") && !repeat.contains("MB/s"),
+            "scan: a repeat scan does not invent a byte rate ({repeat})"
+        );
+    }
+
     // Hit-to-NOP: a hit record carries the instruction bytes it executed, so
     // the patch length must come from decoding those bytes, not from the
     // text form. Decode the exact sequence the dbg-test loop writes and
