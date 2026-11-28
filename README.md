@@ -92,6 +92,8 @@ Zero 1.2 把界面颜色从编译期常量换成了**运行时主题引擎**：
 
 格式细节与示例见 [docs/themes.md](docs/themes.md) 与 [docs/plugins.md](docs/plugins.md)；仓库里带了两个可用的主题包（[themes/](themes/)）和一个演示插件（[examples/plugins/](examples/plugins/)）。失败的包只会被跳过并在设置里列出原因，不会挡住启动。
 
+后续要做什么、为什么是这个顺序，见 [docs/roadmap.md](docs/roadmap.md)。
+
 ## 自动更新
 
 装好之后不用再手动下安装包：程序启动时自己查一次新版本，有就提示、下载、替换、重启，全程不弹 UAC。
