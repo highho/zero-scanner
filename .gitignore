@@ -46,3 +46,6 @@ CON
 Thumbs.db
 .DS_Store
 *.user
+
+# Compress helper scratch files
+/.s*.txt
