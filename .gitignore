@@ -17,6 +17,7 @@
 
 # Local scratch files and test fixtures
 /e2e_target.info
+/e2e_tick.txt
 /zero-workspace.json
 /inbox/
 /usage.json
