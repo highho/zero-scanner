@@ -51,6 +51,49 @@ pub const PRESETS: [Preset; 4] = [
     },
 ];
 
+
+// Game-profile presets registered by plugins. Kept separate from the built-in
+// PRESETS so the built-in list stays a const and the UI can label the two
+// sources differently.
+static PROFILE_PRESETS: std::sync::OnceLock<std::sync::Mutex<Vec<Preset>>> =
+    std::sync::OnceLock::new();
+
+fn profile_presets() -> &'static std::sync::Mutex<Vec<Preset>> {
+    PROFILE_PRESETS.get_or_init(|| std::sync::Mutex::new(Vec::new()))
+}
+
+/// Register a preset that came from a plugin game profile.
+///
+/// Presets use static strings so the scan page can keep copying them around;
+/// registration happens once at startup, so the leak is bounded and small.
+pub fn register_profile_preset(preset: Preset) -> Result<(), String> {
+    if preset.label.trim().is_empty() || preset.value.trim().is_empty() {
+        return Err(format!("游戏配置「{}」缺少标签或数值。", preset.key));
+    }
+    let mut guard = profile_presets().lock().unwrap();
+    if guard.iter().any(|p| p.key.eq_ignore_ascii_case(preset.key)) {
+        return Err(format!("游戏配置「{}」已经注册过了。", preset.key));
+    }
+    guard.push(preset);
+    Ok(())
+}
+
+/// Every preset the scan page should offer: built-ins first, then plugins.
+pub fn all_presets() -> Vec<Preset> {
+    let mut list: Vec<Preset> = PRESETS.to_vec();
+    list.extend(profile_presets().lock().unwrap().iter().copied());
+    list
+}
+
+/// Presets contributed by plugins only.
+pub fn plugin_presets() -> Vec<Preset> {
+    profile_presets().lock().unwrap().clone()
+}
+
+/// Drop plugin presets. Used by the self-test to stay isolated.
+pub fn clear_profile_presets() {
+    profile_presets().lock().unwrap().clear();
+}
 fn contains_any(haystack: &str, needles: &[&str]) -> bool {
     needles.iter().any(|n| haystack.contains(n))
 }

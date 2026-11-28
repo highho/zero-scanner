@@ -1597,7 +1597,16 @@ impl ZeroApp {
             self.struct_error = Some("地址格式不对：试试 0x1A2B3C 或 game.exe+0x4A0C8。".to_string());
             return;
         };
-        match crate::structs::dissect(&handle, &self.ptr_modules, address, self.struct_size) {
+        // The typed address doubles as the template label, so a plugin layout
+        // registered for "Player" applies when the user dissects Player+0x10.
+        let label = self.struct_addr.clone();
+        match crate::structs::dissect_labelled(
+            &handle,
+            &self.ptr_modules,
+            address,
+            self.struct_size,
+            &label,
+        ) {
             Some(result) => {
                 self.struct_result = Some(result);
                 self.struct_error = None;

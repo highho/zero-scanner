@@ -617,6 +617,136 @@ pub fn run() -> bool {
             }
         }
     }
+    // Plugin capabilities: struct templates turn guessed fields into named ones,
+    // and game profiles become presets on the scan page. Both must be honest
+    // about what they cannot do: a bad file is reported, never half-applied.
+    {
+        use crate::structs;
+        let dir = std::env::temp_dir().join("zero-plugin-selftest");
+        let _ = std::fs::remove_dir_all(&dir);
+        let _ = std::fs::create_dir_all(&dir);
+        let template_json = r#"{"name":"unity-player","description":"demo","signature":"Player","fields":[{"name":"hp","offset":"0x00","type":"float"},{"name":"max_hp","offset":"0x04","type":"float"},{"name":"team","offset":"0x08","type":"int32"}]}"#;
+        std::fs::write(dir.join("unity-player.json"), template_json).unwrap();
+        match crate::plugins::load_template(&dir, "unity-player.json") {
+            Ok(template) => {
+                check!(
+                    template.fields.len() == 3 && template.span() == 12,
+                    "plugin struct template parses ({} fields, {} bytes)",
+                    template.fields.len(),
+                    template.span()
+                );
+                structs::clear_templates();
+                check!(
+                    structs::register_template(template.clone()).is_ok(),
+                    "a sane struct template registers"
+                );
+                check!(
+                    structs::register_template(template).is_err(),
+                    "registering the same template twice is refused"
+                );
+                // Applying it must name the fields instead of guessing.
+                let mut bytes = [0u8; 16];
+                bytes[0..4].copy_from_slice(&42.5f32.to_le_bytes());
+                bytes[4..8].copy_from_slice(&100.0f32.to_le_bytes());
+                bytes[8..12].copy_from_slice(&7i32.to_le_bytes());
+                match structs::template_for("Player") {
+                    Some(found) => match found.apply(&bytes) {
+                        Some(fields) => check!(
+                            fields.len() == 3
+                                && fields[0].note.contains("hp")
+                                && fields[2].signed == 7,
+                            "template fields are named and read correctly ({})",
+                            fields[0].note
+                        ),
+                        None => {
+                            ok = false;
+                            log.push_str("FAIL  template did not apply to a big enough block\n");
+                        }
+                    },
+                    None => {
+                        ok = false;
+                        log.push_str("FAIL  template lookup by signature failed\n");
+                    }
+                }
+                // A broken layout (overlapping fields) must be refused up front.
+                let broken = structs::StructTemplate {
+                    name: "broken".to_string(),
+                    signature: "Broken".to_string(),
+                    fields: vec![
+                        structs::TemplateField {
+                            name: "a".to_string(),
+                            offset: 0,
+                            kind: structs::FieldKind::I32,
+                        },
+                        structs::TemplateField {
+                            name: "b".to_string(),
+                            offset: 2,
+                            kind: structs::FieldKind::I32,
+                        },
+                    ],
+                };
+                check!(
+                    structs::register_template(broken).is_err(),
+                    "an overlapping template layout is refused"
+                );
+            }
+            Err(e) => {
+                ok = false;
+                log.push_str(&format!("FAIL  parse plugin template: {e}\n"));
+            }
+        }
+        // Unknown kinds and offsets must fail loudly, not guess.
+        std::fs::write(
+            dir.join("bad-kind.json"),
+            r#"{"name":"bad","fields":[{"name":"x","offset":"0x00","type":"quantum"}]}"#,
+        )
+        .unwrap();
+        check!(
+            crate::plugins::load_template(&dir, "bad-kind.json").is_err(),
+            "a template with an unknown field type is rejected"
+        );
+        structs::clear_templates();
+
+        let profile_json = r#"{"name":"sample-game","description":"demo profile","process":"sample-game.exe","scan":{"value_type":"i32","value":"120","label":"生命值"},"hotkeys":[{"action":"toggle_freeze","key":"F2"},{"action":"warp_to_moon","key":"F9"}]}"#;
+        std::fs::write(dir.join("sample-game.json"), profile_json).unwrap();
+        match crate::plugins::load_profile(&dir, "sample-game.json") {
+            Ok(profile) => {
+                check!(
+                    profile.name == "sample-game" && profile.scan.is_some(),
+                    "plugin game profile parses"
+                );
+                let unsupported = profile.unsupported_keys();
+                check!(
+                    unsupported.len() == 1 && unsupported[0].contains("warp_to_moon"),
+                    "an unsupported hotkey action is reported, not silently dropped ({})",
+                    unsupported.join(",")
+                );
+                crate::smart::clear_profile_presets();
+                let preset = profile.to_preset();
+                check!(
+                    crate::smart::register_profile_preset(preset).is_ok(),
+                    "a game profile registers as a scan preset"
+                );
+                let all = crate::smart::all_presets();
+                check!(
+                    all.len() == crate::smart::PRESETS.len() + 1
+                        && all.last().map(|p| p.value == "120").unwrap_or(false),
+                    "registered presets are offered next to the built-in ones ({})",
+                    all.len()
+                );
+                check!(
+                    crate::smart::register_profile_preset(profile.to_preset()).is_err(),
+                    "registering the same game profile twice is refused"
+                );
+                crate::smart::clear_profile_presets();
+            }
+            Err(e) => {
+                ok = false;
+                log.push_str(&format!("FAIL  parse plugin profile: {e}\n"));
+            }
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
     // Trainer export: every entry is proven writable and restorable before it
     // is written into the exported table, and the launcher points at this exe.
     {

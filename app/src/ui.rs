@@ -785,7 +785,7 @@ impl ZeroApp {
             ui.add_space(6.0);
             ui.horizontal_wrapped(|ui| {
                 ui.label(egui::RichText::new("试试").size(11.0).color(theme::faint()));
-                for p in smart::PRESETS {
+                for p in smart::all_presets() {
                     if theme::pill(ui, p.label, false).clicked() {
                         preset = Some(p);
                     }
@@ -1930,7 +1930,7 @@ impl ZeroApp {
                     });
                     ui.horizontal_wrapped(|ui| {
                         ui.label(egui::RichText::new("快捷").size(10.5).color(theme::faint()));
-                        for p in smart::PRESETS {
+                        for p in smart::all_presets() {
                             if theme::pill(ui, p.label, false).clicked() {
                                 preset = Some(p);
                             }
@@ -2016,7 +2016,7 @@ impl ZeroApp {
         theme::card_frame().show(ui, |ui| {
             ui.label(egui::RichText::new("常用目标").size(13.0).strong());
             ui.add_space(4.0);
-            for p in smart::PRESETS {
+            for p in smart::all_presets() {
                 ui.horizontal(|ui| {
                     let (rect, _) = ui.allocate_exact_size(Vec2::splat(18.0), Sense::hover());
                     theme::paint_icon(ui.painter(), rect.shrink(2.0), IconKind::Practice, theme::accent_2());

@@ -39,6 +39,14 @@ pub struct Manifest {
     /// relative to the plugin folder, e.g. "themes/my-pack.json".
     #[serde(default)]
     pub theme: Option<String>,
+    /// Struct layout files (struct_templates capability). Each path is
+    /// relative to the plugin folder and holds one template JSON.
+    #[serde(default)]
+    pub struct_templates: Vec<String>,
+    /// Game profile files (game_profiles capability). Each path is relative
+    /// to the plugin folder and holds one profile JSON.
+    #[serde(default)]
+    pub game_profiles: Vec<String>,
 }
 
 /// What happened while installing one plugin.
@@ -65,26 +73,205 @@ fn read_manifest(dir: &std::path::Path) -> Result<Manifest, String> {
         .map_err(|e| format!("{} 不是合法 plugin.json：{e}", path.display()))
 }
 
+/// One struct-template file as shipped by a plugin.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct TemplateFile {
+    #[serde(default)]
+    pub name: String,
+    #[serde(default)]
+    pub description: String,
+    /// Module or symbol name the layout belongs to, e.g. "Player".
+    #[serde(default)]
+    pub signature: String,
+    #[serde(default)]
+    pub fields: Vec<TemplateFieldFile>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct TemplateFieldFile {
+    #[serde(default)]
+    pub name: String,
+    /// Offset as text: "0x1C" or "28".
+    #[serde(default)]
+    pub offset: String,
+    /// Kind as text: "float", "int32", "pointer", ...
+    #[serde(default)]
+    pub r#type: String,
+}
+
+/// One game-profile file as shipped by a plugin.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct ProfileFile {
+    #[serde(default)]
+    pub name: String,
+    #[serde(default)]
+    pub description: String,
+    /// Process image name this profile belongs to, e.g. "game.exe".
+    #[serde(default)]
+    pub process: String,
+    #[serde(default)]
+    pub scan: Option<ProfileScan>,
+    /// Hotkeys the profile asks for. Keys the app cannot honour are reported
+    /// as unsupported instead of silently doing nothing.
+    #[serde(default)]
+    pub hotkeys: Vec<ProfileHotkey>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct ProfileScan {
+    #[serde(default)]
+    pub value_type: String,
+    #[serde(default)]
+    pub value: String,
+    #[serde(default)]
+    pub label: String,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct ProfileHotkey {
+    #[serde(default)]
+    pub action: String,
+    #[serde(default)]
+    pub key: String,
+}
+
 fn install_manifest(dir: &std::path::Path, manifest: &Manifest, notice: &mut InstallNotice) {
-    // Only the theme capability is wired today. Unknown keys are ignored but
-    // reported, so a plugin that expected more still gets a clear answer.
+    let mut done: Vec<String> = Vec::new();
+    let mut problems: Vec<String> = Vec::new();
+    let mut unsupported: Vec<String> = Vec::new();
+
     if let Some(theme_path) = &manifest.theme {
         let resolved = dir.join(theme_path);
         match crate::theme::register_plugin_pack(resolved) {
-            Ok(()) => {
-                notice.ok = true;
-                notice.message = format!("已注册主题包 {}", theme_path);
-            }
-            Err(e) => {
-                notice.ok = false;
-                notice.message = format!("主题包注册失败：{e}");
-            }
+            Ok(()) => done.push(format!("主题包 {}", theme_path)),
+            Err(e) => problems.push(format!("主题包注册失败：{e}")),
         }
-    } else {
+    }
+
+    for relative in &manifest.struct_templates {
+        match load_template(dir, relative) {
+            Ok(template) => {
+                let label = template.name.clone();
+                match crate::structs::register_template(template) {
+                    Ok(()) => done.push(format!("结构体模板 {label}")),
+                    Err(e) => problems.push(e),
+                }
+            }
+            Err(e) => problems.push(e),
+        }
+    }
+
+    for relative in &manifest.game_profiles {
+        match load_profile(dir, relative) {
+            Ok(profile) => {
+                let label = profile.name.clone();
+                // Anything the profile asks for that this build does not do
+                // is reported, never faked into looking supported.
+                for key in profile.unsupported_keys() {
+                    unsupported.push(format!("{label}: {key}"));
+                }
+                match crate::smart::register_profile_preset(profile.to_preset()) {
+                    Ok(()) => done.push(format!("游戏配置 {label}")),
+                    Err(e) => problems.push(e),
+                }
+            }
+            Err(e) => problems.push(e),
+        }
+    }
+
+    if done.is_empty() && problems.is_empty() {
         // A manifest with no implemented capability is still installed
         // harmlessly: it declares nothing we can act on yet.
         notice.ok = true;
-        notice.message = "清单没有已实现的能力（目前支持 theme）".to_string();
+        notice.message = "清单没有已实现的能力（支持 theme / struct_templates / game_profiles）"
+            .to_string();
+        return;
+    }
+    let mut message = if done.is_empty() {
+        "没有可用能力".to_string()
+    } else {
+        format!("已注册 {}", done.join("、"))
+    };
+    if !unsupported.is_empty() {
+        message.push_str(&format!("；未支持的键：{}", unsupported.join("、")));
+    }
+    if !problems.is_empty() {
+        message.push_str(&format!("；失败：{}", problems.join("；")));
+    }
+    notice.ok = problems.is_empty();
+    notice.message = message;
+}
+
+pub(crate) fn load_template(dir: &std::path::Path, relative: &str) -> Result<crate::structs::StructTemplate, String> {
+    let path = dir.join(relative);
+    let text = std::fs::read_to_string(&path)
+        .map_err(|e| format!("读不到 {}：{e}", path.display()))?;
+    let file: TemplateFile = serde_json::from_str(&text)
+        .map_err(|e| format!("{} 不是合法的结构体模板：{e}", path.display()))?;
+    if file.name.trim().is_empty() {
+        return Err(format!("{} 缺少 name。", path.display()));
+    }
+    let mut fields = Vec::with_capacity(file.fields.len());
+    for field in &file.fields {
+        let offset = crate::model::parse_address(&field.offset)
+            .ok_or_else(|| format!("字段「{}」的偏移「{}」读不出来。", field.name, field.offset))?;
+        let kind = crate::structs::kind_from_name(&field.r#type)
+            .ok_or_else(|| format!("字段「{}」的类型「{}」不认识。", field.name, field.r#type))?;
+        fields.push(crate::structs::TemplateField {
+            name: field.name.clone(),
+            offset: offset as usize,
+            kind,
+        });
+    }
+    Ok(crate::structs::StructTemplate {
+        name: file.name.clone(),
+        signature: if file.signature.is_empty() {
+            file.name.clone()
+        } else {
+            file.signature.clone()
+        },
+        fields,
+    })
+}
+
+pub(crate) fn load_profile(dir: &std::path::Path, relative: &str) -> Result<ProfileFile, String> {
+    let path = dir.join(relative);
+    let text = std::fs::read_to_string(&path)
+        .map_err(|e| format!("读不到 {}：{e}", path.display()))?;
+    let file: ProfileFile = serde_json::from_str(&text)
+        .map_err(|e| format!("{} 不是合法的游戏配置：{e}", path.display()))?;
+    if file.name.trim().is_empty() {
+        return Err(format!("{} 缺少 name。", path.display()));
+    }
+    Ok(file)
+}
+
+impl ProfileFile {
+    /// Hotkey actions this build does not implement. Kept explicit so the UI
+    /// can say "declared but not supported" instead of pretending.
+    pub fn unsupported_keys(&self) -> Vec<String> {
+        self.hotkeys
+            .iter()
+            .filter(|h| !crate::hotkey::is_supported_action(&h.action))
+            .map(|h| format!("hotkey {}={}", h.action, h.key))
+            .collect()
+    }
+
+    /// Turn the profile into a preset the scan page can apply.
+    pub fn to_preset(&self) -> crate::smart::Preset {
+        let scan = self.scan.clone().unwrap_or_default();
+        let label = if scan.label.is_empty() {
+            self.name.clone()
+        } else {
+            scan.label.clone()
+        };
+        crate::smart::Preset {
+            key: Box::leak(self.name.clone().into_boxed_str()),
+            label: Box::leak(label.into_boxed_str()),
+            hint: Box::leak(self.description.clone().into_boxed_str()),
+            vtype: crate::session::vtype_from_name(&scan.value_type),
+            value: Box::leak(scan.value.into_boxed_str()),
+        }
     }
 }
 

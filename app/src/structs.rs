@@ -112,6 +112,147 @@ pub struct Dissect {
     pub fields: Vec<Field>,
 }
 
+
+/// A struct layout supplied by a plugin (or a bundled example), so the
+/// dissector can name fields instead of guessing.
+///
+/// Templates are advisory: a template whose fields do not fit the block is
+/// ignored for that block rather than producing bogus rows.
+#[derive(Clone, Debug)]
+pub struct StructTemplate {
+    /// Shown in the UI, e.g. "unity-player".
+    pub name: String,
+    /// A module or symbol name this layout is expected at, e.g. "Player".
+    /// Empty means the template is never auto-applied; it can still be
+    /// looked up by name.
+    pub signature: String,
+    pub fields: Vec<TemplateField>,
+}
+
+#[derive(Clone, Debug)]
+pub struct TemplateField {
+    pub name: String,
+    pub offset: usize,
+    pub kind: FieldKind,
+}
+
+impl StructTemplate {
+    /// Byte span the template covers.
+    pub fn span(&self) -> usize {
+        self.fields
+            .iter()
+            .map(|f| f.offset + f.kind.size())
+            .max()
+            .unwrap_or(0)
+    }
+
+    /// True when the layout is at least self-consistent: offsets inside the
+    /// span and no overlapping fields. A broken template is rejected at
+    /// registration time, never half-applied.
+    pub fn is_sane(&self) -> bool {
+        if self.fields.is_empty() || self.name.trim().is_empty() {
+            return false;
+        }
+        let mut ranges: Vec<(usize, usize)> = self
+            .fields
+            .iter()
+            .map(|f| (f.offset, f.offset + f.kind.size()))
+            .collect();
+        if ranges.iter().any(|(a, b)| b <= a) {
+            return false;
+        }
+        ranges.sort_unstable();
+        for pair in ranges.windows(2) {
+            if pair[0].1 > pair[1].0 {
+                return false;
+            }
+        }
+        true
+    }
+
+    /// Interpret `bytes` through this layout. `None` when the block is too
+    /// small for the template.
+    pub fn apply(&self, bytes: &[u8]) -> Option<Vec<Field>> {
+        if !self.is_sane() || bytes.len() < self.span() {
+            return None;
+        }
+        Some(
+            self.fields
+                .iter()
+                .map(|f| {
+                    let mut field = read_field(bytes, f.offset, f.kind);
+                    field.note = format!("{} · {}", self.name, f.name);
+                    field
+                })
+                .collect(),
+        )
+    }
+}
+
+fn read_field(bytes: &[u8], offset: usize, kind: FieldKind) -> Field {
+    let step = kind.size();
+    let span = &bytes[offset..offset + step.min(bytes.len().saturating_sub(offset))];
+    let mut field = Field {
+        offset,
+        kind,
+        bytes: span.to_vec(),
+        unsigned: 0,
+        signed: 0,
+        float: None,
+        ascii: String::new(),
+        note: String::new(),
+    };
+    match kind {
+        FieldKind::Pointer | FieldKind::I64 => {
+            field.unsigned = u64_at(bytes, offset).unwrap_or(0);
+            field.signed = field.unsigned as i64;
+        }
+        FieldKind::F64 => {
+            field.unsigned = u64_at(bytes, offset).unwrap_or(0);
+            field.signed = field.unsigned as i64;
+            field.float = Some(f64::from_le_bytes(
+                bytes[offset..offset + 8].try_into().unwrap_or([0u8; 8]),
+            ));
+        }
+        FieldKind::I32 | FieldKind::F32 => {
+            field.unsigned = u32_at(bytes, offset).unwrap_or(0) as u64;
+            field.signed = field.unsigned as i32 as i64;
+            if kind == FieldKind::F32 {
+                field.float = Some(f32::from_le_bytes(
+                    bytes[offset..offset + 4].try_into().unwrap_or([0u8; 4]),
+                ) as f64);
+            }
+        }
+        FieldKind::I16 => {
+            field.unsigned = u16_at(bytes, offset).unwrap_or(0) as u64;
+            field.signed = field.unsigned as i16 as i64;
+        }
+        FieldKind::I8 | FieldKind::Bytes => {
+            field.unsigned = bytes[offset] as u64;
+            field.signed = bytes[offset] as i8 as i64;
+        }
+        FieldKind::Str => {
+            field.ascii = ascii_of(span);
+        }
+    }
+    field
+}
+
+/// Parse a field-kind name as used by plugin templates.
+pub fn kind_from_name(name: &str) -> Option<FieldKind> {
+    match name.trim().to_ascii_lowercase().as_str() {
+        "pointer" | "ptr" => Some(FieldKind::Pointer),
+        "int32" | "i32" | "int" => Some(FieldKind::I32),
+        "float" | "f32" => Some(FieldKind::F32),
+        "int64" | "i64" => Some(FieldKind::I64),
+        "double" | "f64" => Some(FieldKind::F64),
+        "int16" | "i16" | "short" => Some(FieldKind::I16),
+        "int8" | "i8" | "byte" | "bool" => Some(FieldKind::I8),
+        "string" | "str" | "text" => Some(FieldKind::Str),
+        "bytes" | "raw" => Some(FieldKind::Bytes),
+        _ => None,
+    }
+}
 fn u16_at(bytes: &[u8], offset: usize) -> Option<u16> {
     bytes.get(offset..offset + 2).and_then(|b| b.try_into().ok()).map(u16::from_le_bytes)
 }
@@ -141,6 +282,56 @@ fn is_readable_pointer(handle: &ProcessHandle, pointer: u64) -> bool {
     handle.read(pointer, &mut probe)
 }
 
+
+// Registered templates live for the whole process: plugins load once at start
+// and the dissector reads them on every call, so this stays lock-cheap.
+static TEMPLATES: std::sync::OnceLock<std::sync::Mutex<Vec<StructTemplate>>> =
+    std::sync::OnceLock::new();
+
+fn templates() -> &'static std::sync::Mutex<Vec<StructTemplate>> {
+    TEMPLATES.get_or_init(|| std::sync::Mutex::new(Vec::new()))
+}
+
+/// Register a template. Returns an error (instead of storing junk) when the
+/// layout is inconsistent or the name is already taken by a different layout.
+pub fn register_template(template: StructTemplate) -> Result<(), String> {
+    if !template.is_sane() {
+        return Err(format!("结构体模板「{}」的字段布局不成立。", template.name));
+    }
+    let mut guard = templates().lock().unwrap();
+    if guard.iter().any(|t| t.name.eq_ignore_ascii_case(&template.name)) {
+        return Err(format!("结构体模板「{}」已经注册过了。", template.name));
+    }
+    guard.push(template);
+    Ok(())
+}
+
+/// Templates currently available, in registration order.
+pub fn registered_templates() -> Vec<StructTemplate> {
+    templates().lock().unwrap().clone()
+}
+
+/// Pick the template whose signature matches `label` (a module or symbol name).
+pub fn template_for(label: &str) -> Option<StructTemplate> {
+    let wanted = label.trim().to_ascii_lowercase();
+    if wanted.is_empty() {
+        return None;
+    }
+    templates()
+        .lock()
+        .unwrap()
+        .iter()
+        .find(|t| {
+            let sig = t.signature.trim().to_ascii_lowercase();
+            !sig.is_empty() && (wanted.contains(&sig) || sig.contains(&wanted))
+        })
+        .cloned()
+}
+
+/// Drop every registered template. Used by the self-test to stay isolated.
+pub fn clear_templates() {
+    templates().lock().unwrap().clear();
+}
 /// Read a block and interpret it into candidate fields.
 ///
 /// Cost is bounded: the caller picks the size, and here we peek a few bytes
@@ -167,6 +358,31 @@ pub fn dissect(
         offset += step;
     }
     Some(Dissect { address, annotation, size, fields })
+}
+
+/// Read a block through a named template when one applies.
+///
+/// label is whatever the caller knows about the block (a module or symbol
+/// name). When a registered template matches it, the fields come from the
+/// layout and are named; otherwise this is exactly dissect.
+pub fn dissect_labelled(
+    handle: &ProcessHandle,
+    modules: &[ModuleInfo],
+    address: u64,
+    size: usize,
+    label: &str,
+) -> Option<Dissect> {
+    let template = template_for(label);
+    let mut block = dissect(handle, modules, address, size)?;
+    if let Some(template) = template {
+        let mut bytes = vec![0u8; block.size];
+        if handle.read(address, &mut bytes) {
+            if let Some(fields) = template.apply(&bytes) {
+                block.fields = fields;
+            }
+        }
+    }
+    Some(block)
 }
 
 impl FieldKind {

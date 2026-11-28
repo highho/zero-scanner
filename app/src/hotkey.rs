@@ -53,6 +53,19 @@ pub const SHORTCUTS: &[Shortcut] = &[
     Shortcut { action: Action::ToggleHelp, key: '\'', ctrl: false, shift: false, label: "F1", description: "显示 / 隐藏这份快捷键" },
 ];
 
+
+/// Does this build implement the named action?
+///
+/// Game profiles name actions as text ("toggle_freeze", "scan", ...). Anything
+/// outside this list is reported as unsupported instead of silently doing
+/// nothing, which is the only honest option for a config we did not write.
+pub fn is_supported_action(action: &str) -> bool {
+    matches!(
+        action.trim().to_ascii_lowercase().as_str(),
+        "scan" | "next_scan" | "undo" | "freeze_all" | "open_process" | "show_list"
+            | "toggle_help" | "clear_results" | "view_memory" | "toggle_freeze"
+    )
+}
 /// Which action, if any, a key press triggers.
 ///
 /// `key` is the character the key produces; function keys arrive as their digit

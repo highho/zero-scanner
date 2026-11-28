@@ -156,7 +156,7 @@ fn vtype_name(vtype: VType) -> &'static str {
     }
 }
 
-fn vtype_from_name(name: &str) -> VType {
+pub fn vtype_from_name(name: &str) -> VType {
     match name {
         "i8" => VType::I8,
         "i16" => VType::I16,
