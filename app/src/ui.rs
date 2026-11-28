@@ -5,6 +5,7 @@ use crate::disasm;
 use crate::hotkey;
 use crate::triage;
 use crate::smart::{self, Preset};
+use crate::speed;
 use crate::syms;
 use crate::theme::{self, IconKind, ToastKind};
 use crate::winmem;
@@ -146,6 +147,22 @@ fn empty_state(ui: &mut egui::Ui, icon: IconKind, title: &str, body: &str) {
 
 fn type_pill(ui: &mut egui::Ui, ty: VType, selected: bool) -> Response {
     theme::pill(ui, ty.label(), selected)
+}
+
+/// Heat is a ratio, so the colour ramp is absolute: green means "quiet", red
+/// means "the whole window moved". Using the max of the current pass would
+/// make a calm process look busy.
+fn heat_color(heat: f32) -> Color32 {
+    let t = heat.clamp(0.0, 1.0);
+    if t < 0.02 {
+        theme::faint()
+    } else if t < 0.2 {
+        theme::success()
+    } else if t < 0.6 {
+        theme::warn()
+    } else {
+        theme::danger()
+    }
 }
 
 impl ZeroApp {
@@ -324,6 +341,7 @@ impl ZeroApp {
                 self.nav_item(ui, Tab::Speed, IconKind::Play, "变速齿轮", None);
                 self.nav_item(ui, Tab::Script, IconKind::Bolt, "Lua 脚本", None);
                 self.nav_item(ui, Tab::Struct, IconKind::Structure, "结构浏览", None);
+                self.nav_item(ui, Tab::Heat, IconKind::Grid, "内存热图", None);
                 self.nav_item(ui, Tab::Debugger, IconKind::Bolt, "调试器", None);
                 ui.add_space(14.0);
                 theme::divider(ui);
@@ -1441,6 +1459,200 @@ impl ZeroApp {
     }
 
     /// 结构浏览：把某个地址后面的一整块内存按字段拆开，找出它到底是什么。
+    pub fn ui_heat(&mut self, ui: &mut egui::Ui) {
+        let attached = self.is_attached();
+        let running = self.heat_on;
+        let mut start = false;
+        let mut stop = false;
+        let mut rescan = false;
+        let mut open_mem: Option<u64> = None;
+
+        ui.horizontal(|ui| {
+            ui.vertical(|ui| {
+                ui.label(egui::RichText::new("内存热图").size(26.0).strong().color(theme::text()));
+                ui.label(
+                    egui::RichText::new("看目标进程里哪些页真的在变——热的地方才值得去扫。")
+                        .size(12.5)
+                        .color(theme::muted()),
+                );
+            });
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                if running {
+                    theme::status_chip(ui, "观察中", theme::accent_2());
+                } else {
+                    theme::status_chip(ui, "未启用", theme::faint());
+                }
+            });
+        });
+        ui.add_space(4.0);
+
+        theme::card_frame().show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.horizontal(|ui| {
+                theme::section_label(ui, "采样间隔");
+                ui.add_space(8.0);
+                ui.add(
+                    egui::Slider::new(&mut self.heat_interval, 0.2..=5.0)
+                        .step_by(0.1)
+                        .fixed_decimals(1)
+                        .suffix(" 秒"),
+                );
+                ui.add_space(12.0);
+                if !running {
+                    if theme::gradient_button(ui, "开始观察", 128.0, attached).clicked() && attached {
+                        start = true;
+                    }
+                } else {
+                    if theme::outline_button(ui, "停止", true).clicked() {
+                        stop = true;
+                    }
+                    if theme::outline_button(ui, "重新采样区域", true).clicked() {
+                        rescan = true;
+                    }
+                }
+            });
+            ui.add_space(6.0);
+            ui.label(
+                egui::RichText::new(
+                    "只读采样：读一小段、记住、下次再读一遍比差值，不会往目标进程写任何东西，所以可以一直开着。",
+                )
+                .size(10.5)
+                .color(theme::faint()),
+            );
+        });
+        ui.add_space(12.0);
+
+        let pass = self.heat.last().clone();
+        theme::card_frame().show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.horizontal(|ui| {
+                theme::section_label(ui, "变化页");
+                ui.add_space(8.0);
+                theme::status_chip(
+                    ui,
+                    &format!("{} 个区域", self.heat.watched()),
+                    theme::faint(),
+                );
+                if pass.sampled_bytes > 0 {
+                    theme::status_chip(
+                        ui,
+                        &format!("采样 {} / {} ms", format_bytes(pass.sampled_bytes), pass.elapsed_ms),
+                        theme::faint(),
+                    );
+                }
+            });
+            ui.add_space(8.0);
+
+            if !self.heat.is_watching() {
+                empty_state(
+                    ui,
+                    IconKind::Grid,
+                    "还没有开始观察",
+                    "连接进程后点「开始观察」：先记一遍可写区域，之后每隔一会儿比一次差值。",
+                    );
+            } else if pass.regions.is_empty() {
+                empty_state(
+                    ui,
+                    IconKind::Grid,
+                    "第一遍采样中",
+                    "刚记下基线，第二遍开始才会有变化量。",
+                    );
+            } else {
+                let hot = pass.hot_regions(0.01);
+                ui.label(
+                    egui::RichText::new(format!(
+                        "{} 个区域里有 {} 个在这一遍有字节变化（热区占比 {:.1}%）。",
+                        pass.regions.len(),
+                        hot,
+                        hot as f32 / pass.regions.len().max(1) as f32 * 100.0
+                    ))
+                    .size(11.5)
+                    .color(theme::muted()),
+                );
+                ui.add_space(8.0);
+                egui::ScrollArea::vertical()
+                    .max_height(420.0)
+                    .auto_shrink([false, false])
+                    .show(ui, |ui| {
+                        for heat in pass.hottest().into_iter().take(80) {
+                            theme::soft_card().show(ui, |ui| {
+                                ui.set_width(ui.available_width());
+                                ui.horizontal(|ui| {
+                                    let color = heat_color(heat.heat);
+                                    let (rect, _) = ui
+                                        .allocate_exact_size(Vec2::splat(12.0), Sense::hover());
+                                    ui.painter().rect_filled(rect, Rounding::same(3.0), color);
+                                    ui.add_space(6.0);
+                                    ui.label(
+                                        egui::RichText::new(format!("{:016X}", heat.base))
+                                            .size(12.0)
+                                            .color(theme::text())
+                                            .font(FontId::monospace(12.0)),
+                                    );
+                                    ui.add_space(8.0);
+                                    theme::tag(
+                                        ui,
+                                        &format!("{:.1} MB", heat.mb()),
+                                        theme::faint(),
+                                    );
+                                    theme::tag(
+                                        ui,
+                                        &format!("{} / {} 字节变了", heat.changed, heat.sampled),
+                                        color,
+                                    );
+                                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                                        if theme::outline_button(ui, "内存中查看", true).clicked() {
+                                            open_mem = Some(heat.base);
+                                        }
+                                        ui.add_space(6.0);
+                                        theme::tag(
+                                            ui,
+                                            &format!("{:.0}%", heat.heat * 100.0),
+                                            color,
+                                        );
+                                    });
+                                });
+                            });
+                            ui.add_space(4.0);
+                        }
+                    });
+            }
+        });
+        ui.add_space(12.0);
+
+        theme::card_frame().show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            theme::section_label(ui, "说明");
+            ui.add_space(6.0);
+            for line in [
+                "原理：每个可写区域读开头 4 KB 存起来，下一遍再读一次，逐字节比较——变化的字节数就是热度。",
+                "只看可写区域：代码段与只读资源不会变，盯着它们只是浪费一次读。",
+                "最多同时观察 512 个区域，采样量约 2 MB，间隔默认 1 秒，不会拖慢游戏。",
+                "读失败的区域会被自动丢掉（页面被释放或游戏退出），不会一直重试。",
+                "热区只是「值得先扫」的线索，真正的数值还要靠扫描确认。",
+            ] {
+                ui.label(
+                    egui::RichText::new(format!("· {line}"))
+                        .size(10.5)
+                        .color(theme::faint()),
+                );
+            }
+        });
+
+        if start {
+            self.start_heat();
+        }
+        if stop {
+            self.stop_heat();
+        }
+        if rescan {
+            self.start_heat();
+        }
+        if let Some(address) = open_mem {
+            self.open_memory_at(address);
+        }
+    }
+
     pub fn ui_struct(&mut self, ui: &mut egui::Ui) {
         let mut dissect = false;
         let mut goto = false;
@@ -3661,6 +3873,8 @@ impl ZeroApp {
         let mut start = false;
         let mut stop = false;
         let mut preset: Option<f64> = None;
+        let mut mode = self.speed_mode;
+        let mut refresh = false;
 
         ui.horizontal(|ui| {
             ui.vertical(|ui| {
@@ -3709,6 +3923,43 @@ impl ZeroApp {
             });
             ui.add_space(10.0);
             ui.horizontal(|ui| {
+                theme::section_label(ui, "作用范围");
+                ui.add_space(8.0);
+                // Choosing the scope while running would mean the loop changes
+                // which threads it flips mid-flight; stop first, then pick.
+                if theme::pill(ui, "只停游戏逻辑", mode == speed::TargetMode::GameLogic).clicked()
+                    && !running
+                {
+                    mode = speed::TargetMode::GameLogic;
+                    refresh = true;
+                }
+                if theme::pill(ui, "全部线程", mode == speed::TargetMode::All).clicked() && !running {
+                    mode = speed::TargetMode::All;
+                    refresh = true;
+                }
+                if running {
+                    ui.label(
+                        egui::RichText::new("（运行中不能切换，先停止）")
+                            .size(10.5)
+                            .color(theme::faint()),
+                    );
+                }
+            });
+            ui.add_space(4.0);
+            ui.label(
+                egui::RichText::new(match mode {
+                    speed::TargetMode::GameLogic => {
+                        "只挂起起点落在游戏自身模块内的线程，渲染与音频线程照常跑——画面不卡、声音不断，这是默认。"
+                    }
+                    speed::TargetMode::All => {
+                        "挂起进程的每一个线程，效果最彻底，但画面和声音会跟着一起停，只适合不在乎画面的场合。"
+                    }
+                })
+                .size(10.5)
+                .color(theme::faint()),
+            );
+            ui.add_space(10.0);
+            ui.horizontal(|ui| {
                 if !running {
                     if theme::gradient_button(ui, "开启变速", 128.0, attached).clicked() && attached {
                         start = true;
@@ -3720,7 +3971,7 @@ impl ZeroApp {
                 if running {
                     theme::status_chip(
                         ui,
-                        &format!("{} 个线程", self.speed_threads),
+                        &format!("{} / {} 个线程", self.speed_threads, self.speed_candidates),
                         theme::accent_2(),
                     );
                 }
@@ -3743,9 +3994,11 @@ impl ZeroApp {
             theme::section_label(ui, "说明");
             ui.add_space(6.0);
             for line in [
-                "原理：每 40 ms 为一个周期，先把目标进程的所有线程挂起，再放行其中一小段时间。",
-                "放行时间与周期的比例就是倍率：0.5x 只放行四分之一，2x 放行三分之二。",
-                "每个周期结束都会把挂起的线程全部恢复，不会留下卡死的进程。",
+                "原理：把选中的线程挂起一段时间再放行，放行时间与周期的比例就是倍率：0.5x 只放行四分之一，2x 放行三分之二。",
+                "周期会按线程数自动放宽（8 个以内 20 ms，上百个到 60 ms），否则切换本身就会吃掉预算。",
+                "「只停游戏逻辑」按线程起点判断：起点落在游戏自身模块里的才挂起，系统 DLL 里的渲染与音频线程不动。",
+                "读不到起点的线程在这种模式下不碰——猜错就会把画面一起冻住，正是这个模式要避免的。",
+                "每个周期结束都会把挂起的线程全部恢复，不会留下卡死的进程；停止时会再兜底恢复一次。",
                 "不能对自己挂起（Zero 自己就是被挂起的进程时会直接拒绝）。",
             ] {
                 ui.label(
@@ -3759,6 +4012,17 @@ impl ZeroApp {
 
         if let Some(value) = preset {
             self.speed_factor = value;
+        }
+        if mode != self.speed_mode {
+            self.speed_mode = mode;
+        }
+        if refresh {
+            // Re-count the candidates for the newly chosen scope so the chip
+            // reflects what the next start will actually touch.
+            if let Some(pid) = self.attached_pid {
+                let modules = self.process.as_ref().map(|h| h.modules()).unwrap_or_default();
+                self.speed_candidates = speed::plan_threads(pid, &modules, self.speed_mode).len();
+            }
         }
         if start {
             self.start_speed();
@@ -4112,7 +4376,7 @@ impl ZeroApp {
                     State::Downloading(_) => {
                         theme::tag(ui, "下载中", theme::accent());
                     }
-                    State::Ready(_) => {
+                    State::Ready { .. } => {
                         theme::tag(ui, "待重启", theme::success());
                     }
                     State::Failed(_) => {
@@ -4167,13 +4431,27 @@ impl ZeroApp {
                             .fill(theme::accent()),
                     );
                 }
-                State::Ready(_) => {
+                State::Ready { hash, .. } => {
                     ui.add_space(6.0);
-                    ui.label(
-                        egui::RichText::new("文件已下载。重启后会先替换程序，再自动打开新版。")
-                            .size(11.0)
-                            .color(theme::success()),
-                    );
+                    let (text, color) = match hash {
+                        update::HashCheck::Match(sum) => (
+                            format!(
+                                "文件已下载，SHA256 与官方公布的一致（{}…）。重启后会先替换程序，再自动打开新版。",
+                                &sum[..sum.len().min(12)]
+                            ),
+                            theme::success(),
+                        ),
+                        update::HashCheck::Mismatch { expected, actual } => (
+                            format!("下载的文件哈希不对：官方 {expected}，实际 {actual}"),
+                            theme::danger(),
+                        ),
+                        update::HashCheck::NotPublished => (
+                            "文件已下载，但发布说明里没有公布 SHA256，这次无法核对。重启后会先替换程序，再自动打开新版。"
+                                .to_string(),
+                            theme::warn(),
+                        ),
+                    };
+                    ui.label(egui::RichText::new(text).size(11.0).color(color));
                 }
                 State::Failed(error) => {
                     ui.add_space(6.0);
@@ -4198,7 +4476,7 @@ impl ZeroApp {
                             }
                         }
                     }
-                    State::Ready(_) => {
+                    State::Ready { .. } => {
                         if theme::gradient_button(ui, "重启并安装", 120.0, true).clicked() {
                             install_now = true;
                         }

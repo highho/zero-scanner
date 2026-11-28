@@ -6,6 +6,7 @@ use crate::speed;
 use crate::debugger::{self, DebugSession, BpKind, Slot};
 use crate::disasm;
 use crate::focus;
+use crate::heat;
 use crate::hotkey;
 use crate::inj;
 use crate::lua as script;
@@ -42,6 +43,7 @@ pub enum Tab {
     Speed,
     Script,
     Struct,
+    Heat,
     Debugger,
 }
 
@@ -227,6 +229,20 @@ pub struct ZeroApp {
     pub speed_real_start: Option<Instant>,
     pub speed_error: Option<String>,
     pub speed_threads: usize,
+    /// Which threads the speed change is allowed to touch. GameLogic is the
+    /// default: freezing the renderer is what makes the naive version stutter.
+    pub speed_mode: speed::TargetMode,
+    /// Threads the last tick actually stopped, and how many candidates the plan
+    /// considered. Shown on the speed page so the filter is not a black box.
+    pub speed_candidates: usize,
+
+    /// Which pages of the target are actually changing. Read-only sampling:
+    /// nothing is written to the game, so it is safe to leave on.
+    pub heat: heat::HeatMap,
+    pub heat_on: bool,
+    /// Seconds between passes. Shorter is more accurate and more expensive.
+    pub heat_interval: f32,
+    pub heat_last: Option<Instant>,
 
     pub workspace_path: String,
     pub show_hotkeys: bool,
@@ -357,6 +373,12 @@ impl ZeroApp {
             speed_real_start: None,
             speed_error: None,
             speed_threads: 0,
+            speed_mode: speed::TargetMode::GameLogic,
+            speed_candidates: 0,
+            heat: heat::HeatMap::new(),
+            heat_on: false,
+            heat_interval: 1.0,
+            heat_last: None,
             workspace_path: workspace_path(),
             show_hotkeys: false,
             mcp: None,
@@ -480,6 +502,17 @@ impl ZeroApp {
                 },
             ];
             app.ptr_modules_loaded = true;
+            // Give the heat page real data instead of a fabricated list: sample
+            // this very process twice, so the screenshot proves the sampler works.
+            if let Some(handle) = app.process.clone() {
+                let regions = handle.regions(true);
+                app.heat.adopt(&regions);
+                app.heat.sample(&handle);
+                std::thread::sleep(Duration::from_millis(150));
+                app.heat.sample(&handle);
+                app.heat_on = true;
+                app.heat_last = Some(Instant::now());
+            }
             // Demo aliases so the symbol page shows the card with content.
             crate::aliases::clear();
             let _ = crate::aliases::add("player_hp", "game.exe+0x1A2B");
@@ -707,6 +740,7 @@ impl ZeroApp {
             Tab::Speed => self.ui_speed(ui),
             Tab::Script => self.ui_script(ui),
             Tab::Struct => self.ui_struct(ui),
+            Tab::Heat => self.ui_heat(ui),
             Tab::Debugger => self.ui_debugger(ui),
         }
     }
@@ -724,7 +758,7 @@ impl ZeroApp {
 
     /// 下载完成后：写更新脚本、退出，让脚本替换 exe 再启动新版。
     pub fn apply_update(&mut self) -> bool {
-        if let update::State::Ready(path) = &self.update.state {
+        if let update::State::Ready { path, .. } = &self.update.state {
             match update::install_and_restart(path) {
                 Ok(()) => {
                     self.save_workspace();
@@ -780,6 +814,11 @@ impl ZeroApp {
             self.sym_table = None;
             self.sym_error = None;
             self.sym_filter.clear();
+            // The new process has different pages; keeping the old bytes would
+            // report every region as changed on the first pass.
+            self.heat.clear();
+            self.heat_on = false;
+            self.heat_last = None;
         }
         self.process_name = handle.name.clone();
         self.process_arch = if handle.is_64bit { "x64" } else { "x86" }.to_string();
@@ -825,6 +864,9 @@ impl ZeroApp {
         self.hit_history.clear();
         self.mem_loaded = false;
         self.mem_data.clear();
+        self.heat.clear();
+        self.heat_on = false;
+        self.heat_last = None;
         for entry in &mut self.entries {
             entry.current = None;
             entry.previous = None;
@@ -2610,15 +2652,23 @@ impl ZeroApp {
             self.toast("先连接一个进程。", ToastKind::Warn);
             return false;
         };
-        // Prove the process can be suspended at all before promising a speed.
-        let threads = match speed::thread_ids(pid) {
-            ids if ids.is_empty() => {
-                self.speed_error = Some("这个进程没有可挂起的线程。".to_string());
-                return false;
-            }
-            ids => ids,
-        };
-        self.speed_threads = threads.len();
+        // Prove there is something worth suspending before promising a speed.
+        // In GameLogic mode an empty plan means every thread starts outside the
+        // game's own modules (a launcher, a pure .NET shell); falling back to
+        // "stop everything" there would silently undo the whole point of the mode.
+        let modules = self.process.as_ref().map(|h| h.modules()).unwrap_or_default();
+        let plan = speed::plan_threads(pid, &modules, self.speed_mode);
+        if plan.is_empty() {
+            self.speed_error = Some(match self.speed_mode {
+                speed::TargetMode::All => "这个进程没有可挂起的线程。".to_string(),
+                speed::TargetMode::GameLogic => {
+                    "这个进程里没有线程跑在游戏模块内（可能是启动器或纯脚本外壳）。换成「全部线程」再试。".to_string()
+                }
+            });
+            return false;
+        }
+        self.speed_candidates = plan.len();
+        self.speed_threads = plan.len();
         self.speed_error = None;
         self.speed_on = true;
         self.speed_base = self.speed_factor;
@@ -2638,9 +2688,13 @@ impl ZeroApp {
         self.speed_on = false;
         self.speed_real_start = None;
         // The tick loop resumes what it stopped on its last pass; this is the
-        // belt-and-braces path in case it stopped mid-cycle.
+        // belt-and-braces path in case it stopped mid-cycle. Resume the same
+        // set the loop would have: suspending a fresh "everything" set here
+        // would leave the renderer stopped for a frame in GameLogic mode.
         if let Some(pid) = self.attached_pid {
-            let leftovers = speed::suspend_all(pid).unwrap_or_default();
+            let modules = self.process.as_ref().map(|h| h.modules()).unwrap_or_default();
+            let plan = speed::plan_threads(pid, &modules, self.speed_mode);
+            let leftovers = speed::suspend_threads(pid, &plan).unwrap_or_default();
             speed::resume_all(&leftovers);
         }
         self.toast("变速已停止，所有线程已恢复。", ToastKind::Info);
@@ -2658,10 +2712,18 @@ impl ZeroApp {
         let plan = speed::SpeedPlan {
             factor: self.speed_factor,
         };
-        let tick = speed::Tick::from_plan(plan);
         // Freeze for stop_ms, then release for run_ms. The whole cycle happens
         // inside this call so no thread is ever left suspended between frames.
-        match speed::suspend_all(pid) {
+        let modules = self.process.as_ref().map(|h| h.modules()).unwrap_or_default();
+        let choices = speed::plan_threads(pid, &modules, self.speed_mode);
+        self.speed_candidates = choices.len();
+        if choices.is_empty() {
+            self.speed_error = Some("目标线程都不见了（游戏可能刚退出或换了场景）。".to_string());
+            self.speed_on = false;
+            return;
+        }
+        let tick = speed::Tick::from_plan_for(plan, choices.len());
+        match speed::suspend_threads(pid, &choices) {
             Ok(stopped) => {
                 if stopped.is_empty() {
                     self.speed_error = Some("进程线程都打不开（可能需要管理员权限）。".to_string());
@@ -2684,6 +2746,62 @@ impl ZeroApp {
         }
     }
 
+    /// Start watching the writable regions of the attached process.
+    /// The first pass only builds a baseline; heat appears from the second on.
+    pub fn start_heat(&mut self) -> bool {
+        let Some(handle) = self.process.clone() else {
+            self.toast("先连接一个进程。", ToastKind::Warn);
+            return false;
+        };
+        let regions = handle.regions(true);
+        let watched = self.heat.adopt(&regions);
+        if watched == 0 {
+            self.toast("这个进程没有可写的内存区域，没有可以观察的页。", ToastKind::Warn);
+            return false;
+        }
+        self.heat.sample(&handle);
+        self.heat_last = Some(Instant::now());
+        self.heat_on = true;
+        self.toast(
+            format!("开始观察 {watched} 个内存区域，第二遍起才有变化量。"),
+            ToastKind::Success,
+        );
+        true
+    }
+
+    pub fn stop_heat(&mut self) {
+        if !self.heat_on {
+            return;
+        }
+        self.heat_on = false;
+        self.heat_last = None;
+        self.toast("已停止观察，保留最后一次的结果。", ToastKind::Info);
+    }
+
+    /// One sampling pass when the interval has elapsed. Sampling is bounded by
+    /// the interval rather than per frame: reading hundreds of regions every
+    /// frame would cost more than the game itself.
+    pub fn tick_heat(&mut self, ctx: &egui::Context) {
+        if !self.heat_on {
+            return;
+        }
+        let Some(handle) = self.process.clone() else {
+            self.heat_on = false;
+            return;
+        };
+        let interval = Duration::from_millis((self.heat_interval.max(0.2) * 1000.0) as u64);
+        let due = match self.heat_last {
+            Some(last) => last.elapsed() >= interval,
+            None => true,
+        };
+        if !due {
+            ctx.request_repaint_after(interval);
+            return;
+        }
+        self.heat.sample(&handle);
+        self.heat_last = Some(Instant::now());
+        ctx.request_repaint_after(interval);
+    }
     pub fn open_ct_table(&mut self) {
         let path = self.ct_path.trim().to_string();
         if path.is_empty() {
@@ -3107,6 +3225,7 @@ fn tab_tag(tab: Tab) -> &'static str {
         Tab::Speed => "speed",
         Tab::Script => "script",
         Tab::Struct => "struct",
+        Tab::Heat => "heat",
         Tab::Debugger => "debugger",
     }
 }
@@ -3189,6 +3308,7 @@ impl eframe::App for ZeroApp {
         self.refresh_entries(ctx);
         self.tick_practice(ctx);
         self.tick_speed();
+        self.tick_heat(ctx);
         self.tick_watch(ctx);
         self.poll_update(ctx);
 
@@ -3223,6 +3343,7 @@ impl eframe::App for ZeroApp {
                         | Tab::Speed
                         | Tab::Script
                         | Tab::Struct
+                        | Tab::Heat
                         | Tab::Debugger
                 );
                 if scroll_page {

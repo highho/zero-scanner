@@ -1085,6 +1085,132 @@ pub fn run() -> bool {
             ghost.map(|t| t.is_empty()).unwrap_or(false),
             "suspending a nonexistent process stops zero threads"
         );
+        // The cycle widens with the thread count, and the ratio is untouched.
+        check!(
+            speed::period_for(4) < speed::period_for(200),
+            "the speed cycle widens for thread-heavy targets ({} -> {} ms)",
+            speed::period_for(4),
+            speed::period_for(200)
+        );
+        let (p_short, r_short) = speed::SpeedPlan { factor: 0.5 }.timing_for(20);
+        let (p_long, r_long) = speed::SpeedPlan { factor: 0.5 }.timing_for(60);
+        check!(
+            r_short < p_short / 2 && r_long < p_long / 2,
+            "half speed stays under half at both cycle lengths ({}/{}, {}/{})",
+            r_short, p_short, r_long, p_long
+        );
+        // Thread start addresses come from ntdll; every live thread of ours
+        // must resolve to something inside a loaded module.
+        let start = speed::thread_start_address(ids[0]);
+        check!(
+            start.map(|a| a > 0x1000).unwrap_or(false),
+            "reads the start address of a live thread ({:X?})",
+            start
+        );
+        // GameLogic mode must never widen into "everything": with a module list
+        // that contains none of our code, the plan has to be empty.
+        let foreign = vec![crate::winmem::ModuleInfo {
+            name: "not-our-code.dll".to_string(),
+            base: 0x1_0000_0000,
+            size: 0x1000,
+        }];
+        let narrowed = speed::plan_threads(pid, &foreign, speed::TargetMode::GameLogic);
+        check!(
+            narrowed.is_empty(),
+            "game-logic mode picks no thread outside the game modules ({})",
+            narrowed.len()
+        );
+        let wide = speed::plan_threads(pid, &foreign, speed::TargetMode::All);
+        check!(
+            wide.len() == ids.len(),
+            "all-threads mode still covers every thread ({} of {})",
+            wide.len(),
+            ids.len()
+        );
+    }
+    // Memory heat map: sample our own process twice and prove it notices a
+    // write, and only counts the bytes that actually moved.
+    {
+        use crate::heat::{HeatMap, MAX_REGIONS, WINDOW};
+        let mut cell = [0u8; 64];
+        let base = cell.as_mut_ptr() as u64;
+        let region = crate::model::Region {
+            base,
+            size: 64,
+            writable: true,
+            executable: false,
+        };
+        let handle = crate::winmem::open_process(pid, "zero-scanner.exe");
+        if let Ok(handle) = handle {
+            let mut map = HeatMap::new();
+            let adopted = map.adopt(&[region]);
+            check!(adopted == 1, "heat map adopts a writable region ({adopted})");
+            let first = map.sample(&handle).clone();
+            check!(
+                first.regions.len() == 1 && first.regions[0].heat == 0.0,
+                "the first heat pass only builds a baseline (heat {:.2})",
+                first.regions.first().map(|r| r.heat).unwrap_or(-1.0)
+            );
+            // Move exactly three bytes: the pass must count three, not "some".
+            cell[0] = 0x11;
+            cell[1] = 0x22;
+            cell[2] = 0x33;
+            let second = map.sample(&handle).clone();
+            let heat = second.regions.first().copied().unwrap_or_default();
+            check!(
+                heat.changed == 3,
+                "heat counts exactly the bytes that changed ({})",
+                heat.changed
+            );
+            check!(
+                (heat.heat - 3.0 / 64.0).abs() < 0.001,
+                "heat is the changed fraction of the window ({:.4})",
+                heat.heat
+            );
+            check!(map.passes == 2, "two passes are recorded ({})", map.passes);
+            // A stable region must cool back down: heat is per pass, not cumulative.
+            let third = map.sample(&handle).clone();
+            check!(
+                third.regions.first().map(|r| r.changed) == Some(0),
+                "a quiet pass reports no change again"
+            );
+            // Reading a region that is gone must drop it instead of retrying.
+            let ghost = crate::model::Region {
+                base: 0x10,
+                size: 64,
+                writable: true,
+                executable: false,
+            };
+            let mut broken = HeatMap::new();
+            broken.adopt(&[ghost]);
+            let pass = broken.sample(&handle).clone();
+            check!(
+                pass.regions.is_empty(),
+                "an unreadable region is dropped instead of retried ({})",
+                pass.regions.len()
+            );
+            map.clear();
+            check!(!map.is_watching() && map.passes == 0, "clear forgets every region");
+            // The window and the region cap keep a pass bounded.
+            check!(
+                WINDOW > 0 && MAX_REGIONS >= 128,
+                "heat sampling stays bounded ({WINDOW} B x {MAX_REGIONS})"
+            );
+            let many: Vec<crate::model::Region> = (0..MAX_REGIONS as u64 + 32)
+                .map(|i| crate::model::Region {
+                    base: 0x1000 + i * 0x1000,
+                    size: 0x1000,
+                    writable: true,
+                    executable: false,
+                })
+                .collect();
+            let mut capped = HeatMap::new();
+            let took = capped.adopt(&many);
+            check!(
+                took == MAX_REGIONS,
+                "the map stops adopting at the cap ({took})"
+            );
+        }
     }
     // Cheat table: parse a real-shaped .ct document and write one back.
     {

@@ -855,6 +855,7 @@ pub enum IconKind {
     ArrowLeft,
     ArrowRight,
     Structure,
+    Grid,
     Gamepad,
 }
 
@@ -998,6 +999,26 @@ pub fn paint_icon(painter: &egui::Painter, rect: egui::Rect, kind: IconKind, col
                     Stroke::new(1.1, color),
                 );
                 painter.circle_filled(egui::pos2(c.x - r * 0.6, y), r * 0.08, color);
+            }
+        }
+        IconKind::Grid => {
+            // A 3x3 grid of cells with the middle one filled: the same idea as
+            // the heat page, where some pages are hot and most are not.
+            let cell = r * 0.52;
+            for row in 0..3 {
+                for col in 0..3 {
+                    let center = c
+                        + Vec2::new(
+                            (col as f32 - 1.0) * cell,
+                            (row as f32 - 1.0) * cell,
+                        );
+                    let rect = egui::Rect::from_center_size(center, Vec2::splat(cell * 0.72));
+                    if row == 1 && col == 1 {
+                        painter.rect_filled(rect, Rounding::same(1.5), color);
+                    } else {
+                        painter.rect_stroke(rect, Rounding::same(1.5), Stroke::new(1.1, color));
+                    }
+                }
             }
         }
         IconKind::Gamepad => {

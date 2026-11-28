@@ -320,16 +320,12 @@ fn debug_loop(
     // 附加必须与 WaitForDebugEvent 同线程：在这里做。
     if unsafe { DebugActiveProcess(pid) } == 0 {
         let code = unsafe { GetLastError() };
+        // 诊断表统一：界面和 MCP 看到同一句结论和同一个下一步。
+        let message = format!("附加调试失败（系统错误 {code}）：{}", crate::diag::for_debug_attach(code).line());
         if let Ok(mut s) = shared.lock() {
-            s.error = Some(format!(
-                "附加调试失败（系统错误 {code}：{}）",
-                describe_error(code)
-            ));
+            s.error = Some(message.clone());
         }
-        return Err(format!(
-            "附加调试失败（系统错误 {code}：{}）",
-            describe_error(code)
-        ));
+        return Err(message);
     }
     unsafe { DebugSetProcessKillOnExit(0) };
     if let Ok(mut s) = shared.lock() {
@@ -1118,12 +1114,4 @@ pub fn target_main() -> ! {
     }
 }
 
-fn describe_error(code: u32) -> &'static str {
-    match code {
-        5 => "拒绝访问：目标以更高权限运行或受保护，请以管理员身份运行 Zero",
-        87 => "进程已退出或参数无效",
-        299 => "进程已被其它调试器附加（只允许一个调试器）",
-        31 => "目标可能刚崩溃或已退出",
-        _ => "未知错误",
-    }
-}
+

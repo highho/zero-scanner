@@ -398,12 +398,8 @@ pub fn open_process(pid: u32, name: &str) -> Result<Arc<ProcessHandle>, String> 
     }
     if handle == 0 {
         let code = unsafe { GetLastError() };
-        let message = match code {
-            5 => "拒绝访问：这个进程以更高权限运行，请用管理员身份重启 Zero。".to_string(),
-            87 => "进程已经退出。".to_string(),
-            _ => format!("无法打开进程（系统错误 {code}）。"),
-        };
-        return Err(message);
+        // 诊断表只有一处：界面和 MCP 读同一句话，不会出现两个入口两种解释。
+        return Err(crate::diag::for_open_process(code).line());
     }
     let is_64bit = !is_wow64(handle);
     let real_name = process_path(handle)

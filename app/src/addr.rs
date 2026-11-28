@@ -116,7 +116,11 @@ pub fn looks_like_module(text: &str) -> bool {
     lower.contains('.') || lower.contains('_')
 }
 
-/// Parse an offset token: 0x hex, decimal, or a signed number.
+/// Parse an offset token: 0x hex or decimal. Offsets are unsigned because a
+/// pointer-chain step is always an addition; subtraction lives on the head
+/// (`game.exe-0x1000`), which resolve_head handles with checked_sub. A leading
+/// minus here returns None rather than silently clamping to zero — a clamped
+/// offset would resolve to a wrong address that still looks valid.
 pub fn parse_offset(text: &str) -> Option<u64> {
     let t = text.trim();
     if t.is_empty() {
@@ -124,14 +128,6 @@ pub fn parse_offset(text: &str) -> Option<u64> {
     }
     if let Some(rest) = t.strip_prefix("0x").or_else(|| t.strip_prefix("0X")) {
         return u64::from_str_radix(rest, 16).ok();
-    }
-    if let Some(rest) = t.strip_prefix('-') {
-        let value = if let Some(hex) = rest.strip_prefix("0x") {
-            i64::from_str_radix(hex, 16).ok()?
-        } else {
-            rest.parse::<i64>().ok()?
-        };
-        return (0u64).checked_sub(value as u64);
     }
     t.parse::<u64>().ok()
 }
@@ -188,7 +184,9 @@ mod tests {
     fn offset_parse() {
         assert_eq!(parse_offset("0x10"), Some(16));
         assert_eq!(parse_offset("16"), Some(16));
-        assert_eq!(parse_offset("-0x10"), Some(0));
-        assert_eq!(parse_offset("-16"), Some(0));
+        // A chain step is an addition; a negative one is refused instead of
+        // being clamped to zero (which would look like a valid address).
+        assert_eq!(parse_offset("-0x10"), None);
+        assert_eq!(parse_offset("-16"), None);
     }
 }

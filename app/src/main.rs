@@ -6,10 +6,12 @@ mod aliases;
 mod assembler;
 mod ctable;
 mod debugger;
+mod diag;
 mod app;
 mod disasm;
 mod e2e;
 mod focus;
+mod heat;
 mod hotkey;
 mod inj;
 mod lua;
@@ -342,6 +344,7 @@ fn parse_tab(args: &[String]) -> Option<Tab> {
                 "speed" => Some(Tab::Speed),
                 "script" | "lua" => Some(Tab::Script),
                 "struct" | "dissect" => Some(Tab::Struct),
+                "heat" | "map" => Some(Tab::Heat),
                 "debugger" | "breakpoint" => Some(Tab::Debugger),
                 _ => Some(Tab::Scan),
             };

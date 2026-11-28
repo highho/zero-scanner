@@ -157,6 +157,7 @@ mod tests {
         assert_eq!(expand("player_base"), "0x2000");
         assert_eq!(expand("player"), "0x1000");
         // A chain keeps working: the alias is just the head of it.
+        add("hp", "0x1000").unwrap();
         assert_eq!(expand("hp,0x10"), "0x1000,0x10");
         assert_eq!(expand("playerx"), "playerx");
         clear();

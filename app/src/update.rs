@@ -35,7 +35,8 @@ pub struct Release {
 pub enum Msg {
     Checked(Result<Option<Release>, String>),
     Progress(f32),
-    Downloaded(Result<PathBuf, String>),
+    /// 下载完成：文件路径 + 与发布说明里哈希的核对结果。
+    Downloaded(Result<(PathBuf, HashCheck), String>),
 }
 
 pub enum State {
@@ -44,7 +45,8 @@ pub enum State {
     Current,
     Available(Release),
     Downloading(f32),
-    Ready(PathBuf),
+    /// 已下载并核对过。哈希不一致时不会走到这里（下载阶段就判失败）。
+    Ready { path: PathBuf, hash: HashCheck },
     Failed(String),
 }
 
@@ -146,7 +148,18 @@ impl Updater {
         self.rx = Some(rx);
         let release = release.clone();
         std::thread::spawn(move || {
-            let got = download_release(&release, tx.clone());
+            // 下载完立刻核对哈希：等用户点「重启并安装」时再查，文件可能已经
+            // 被别的东西换掉，那时拒绝安装已经太晚（界面会以为是文件坏了）。
+            let got = download_release(&release, tx.clone()).and_then(|path| {
+                let check = check_hash(&path, &release.notes)?;
+                if let HashCheck::Mismatch { expected, actual } = &check {
+                    let _ = std::fs::remove_file(&path);
+                    return Err(format!(
+                        "下载的文件哈希不对，已删除：官方 {expected}，实际 {actual}"
+                    ));
+                }
+                Ok((path, check))
+            });
             let _ = tx.send(Msg::Downloaded(got));
         });
     }
@@ -196,9 +209,14 @@ impl Updater {
                 Msg::Progress(p) => {
                     self.state = State::Downloading(p);
                 }
-                Msg::Downloaded(Ok(path)) => {
-                    self.state = State::Ready(path);
-                    notes.push("更新已下载，重启后生效".to_string());
+                Msg::Downloaded(Ok((path, hash))) => {
+                    let verified = matches!(hash, HashCheck::Match(_));
+                    self.state = State::Ready { path, hash };
+                    notes.push(if verified {
+                        "更新已下载，SHA256 与官方公布的一致，重启后生效".to_string()
+                    } else {
+                        "更新已下载，但发布说明没公布 SHA256，无法核对".to_string()
+                    });
                     self.rx = None;
                 }
                 Msg::Downloaded(Err(e)) => {
@@ -721,4 +739,198 @@ where
     F: FnMut(&[u8]) -> Result<(), String>,
 {
     Err("自动更新仅支持 Windows".to_string())
+}
+
+// ---------------------------------------------------------------- SHA256 校验
+
+/// 从发布说明里找出官方公布的安装包哈希。
+///
+/// 约定写在 release notes 里的一行：`sha256: <64 位十六进制>`（大小写不敏感，
+/// 冒号可以换成空格）。找不到就返回 None——此时不做校验，只在界面上说明
+/// 「这次没有哈希可核对」，而不是假装校验过了。
+pub fn published_sha256(notes: &str) -> Option<String> {
+    for line in notes.lines() {
+        let lower = line.to_ascii_lowercase();
+        let Some(at) = lower.find("sha256") else { continue };
+        let rest = &line[at + "sha256".len()..];
+        let rest = rest.trim_start_matches(|c: char| c == ':' || c == '=' || c.is_whitespace());
+        let hex: String = rest
+            .chars()
+            .take_while(|c| c.is_ascii_hexdigit())
+            .collect();
+        if hex.len() == 64 {
+            return Some(hex.to_ascii_lowercase());
+        }
+    }
+    None
+}
+
+/// 算一个文件的 SHA256，返回小写十六进制。
+///
+/// 走系统 BCrypt，不引第三方哈希库：更新校验这种安全相关的事，用操作系统
+/// 自带的实现比多一个依赖更可靠。
+#[cfg(windows)]
+pub fn sha256_file(path: &Path) -> Result<String, String> {
+    use std::io::Read;
+    use windows_sys::Win32::Security::Cryptography::{
+        BCryptCloseAlgorithmProvider, BCryptCreateHash, BCryptDestroyHash, BCryptFinishHash,
+        BCryptGetProperty, BCryptHashData, BCryptOpenAlgorithmProvider, BCRYPT_ALG_HANDLE,
+        BCRYPT_HASH_HANDLE, BCRYPT_SHA256_ALGORITHM,
+    };
+
+    // 这两个属性名 windows-sys 0.52 没有导出成常量，按 SDK 的字面量写。
+    const OBJECT_LENGTH: &[u16] = &[79, 98, 106, 101, 99, 116, 76, 101, 110, 103, 116, 104, 0]; // "ObjectLength"
+    const HASH_LENGTH: &[u16] = &[72, 97, 115, 104, 68, 105, 103, 101, 115, 116, 76, 101, 110, 103, 116, 104, 0]; // "HashDigestLength"
+
+    struct Alg(BCRYPT_ALG_HANDLE);
+    impl Drop for Alg {
+        fn drop(&mut self) {
+            if !self.0.is_null() {
+                unsafe { BCryptCloseAlgorithmProvider(self.0, 0) };
+            }
+        }
+    }
+    struct Hash(BCRYPT_HASH_HANDLE);
+    impl Drop for Hash {
+        fn drop(&mut self) {
+            if !self.0.is_null() {
+                unsafe { BCryptDestroyHash(self.0) };
+            }
+        }
+    }
+
+    unsafe {
+        let mut alg: BCRYPT_ALG_HANDLE = std::ptr::null_mut();
+        if BCryptOpenAlgorithmProvider(&mut alg, BCRYPT_SHA256_ALGORITHM, std::ptr::null(), 0) < 0
+        {
+            return Err("系统没有可用的 SHA256 实现".to_string());
+        }
+        let alg = Alg(alg);
+
+        let mut object_len: u32 = 0;
+        let mut got: u32 = 0;
+        if BCryptGetProperty(
+            alg.0,
+            OBJECT_LENGTH.as_ptr(),
+            &mut object_len as *mut u32 as *mut u8,
+            std::mem::size_of::<u32>() as u32,
+            &mut got,
+            0,
+        ) < 0
+        {
+            return Err("无法取得 SHA256 工作区大小".to_string());
+        }
+        let mut hash_len: u32 = 0;
+        if BCryptGetProperty(
+            alg.0,
+            HASH_LENGTH.as_ptr(),
+            &mut hash_len as *mut u32 as *mut u8,
+            std::mem::size_of::<u32>() as u32,
+            &mut got,
+            0,
+        ) < 0
+        {
+            return Err("无法取得 SHA256 摘要长度".to_string());
+        }
+        if hash_len != 32 {
+            return Err(format!("SHA256 摘要长度异常：{hash_len}"));
+        }
+
+        let mut object = vec![0u8; object_len as usize];
+        let mut handle: BCRYPT_HASH_HANDLE = std::ptr::null_mut();
+        if BCryptCreateHash(
+            alg.0,
+            &mut handle,
+            object.as_mut_ptr(),
+            object_len,
+            std::ptr::null(),
+            0,
+            0,
+        ) < 0
+        {
+            return Err("无法创建 SHA256 摘要".to_string());
+        }
+        let hash = Hash(handle);
+
+        let mut file = std::fs::File::open(path)
+            .map_err(|e| format!("无法读取待校验文件：{e}"))?;
+        let mut buf = vec![0u8; 256 * 1024];
+        loop {
+            let n = file
+                .read(&mut buf)
+                .map_err(|e| format!("读取待校验文件失败：{e}"))?;
+            if n == 0 {
+                break;
+            }
+            if BCryptHashData(hash.0, buf.as_ptr(), n as u32, 0) < 0 {
+                return Err("计算摘要时出错".to_string());
+            }
+        }
+        let mut digest = [0u8; 32];
+        if BCryptFinishHash(hash.0, digest.as_mut_ptr(), 32, 0) < 0 {
+            return Err("收尾摘要时出错".to_string());
+        }
+        Ok(digest.iter().map(|b| format!("{b:02x}")).collect())
+    }
+}
+
+#[cfg(not(windows))]
+pub fn sha256_file(_path: &Path) -> Result<String, String> {
+    Err("SHA256 校验仅支持 Windows".to_string())
+}
+
+/// 校验一个已下载文件是否与官方公布的一致。
+///
+/// 三种结果都要能区分开：一致、不一致（危险，必须拒绝安装）、没有公布哈希
+/// （只能给出「无法核对」，不能当成通过）。
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum HashCheck {
+    Match(String),
+    Mismatch { expected: String, actual: String },
+    NotPublished,
+}
+
+pub fn check_hash(path: &Path, notes: &str) -> Result<HashCheck, String> {
+    let Some(expected) = published_sha256(notes) else {
+        return Ok(HashCheck::NotPublished);
+    };
+    let actual = sha256_file(path)?;
+    if actual == expected {
+        Ok(HashCheck::Match(actual))
+    } else {
+        Ok(HashCheck::Mismatch { expected, actual })
+    }
+}
+
+#[cfg(test)]
+mod hash_tests {
+    use super::*;
+
+    #[test]
+    fn finds_published_hash_in_notes() {
+        let notes = "## 1.5.0\n- 修复若干问题\n\nsha256: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\n";
+        assert_eq!(
+            published_sha256(notes).as_deref(),
+            Some("0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef")
+        );
+    }
+
+    #[test]
+    fn accepts_upper_case_and_equals() {
+        let notes = "SHA256 = 0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF";
+        assert_eq!(
+            published_sha256(notes).as_deref(),
+            Some("0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef")
+        );
+    }
+
+    #[test]
+    fn ignores_short_hex() {
+        assert_eq!(published_sha256("sha256: abcdef"), None);
+    }
+
+    #[test]
+    fn notes_without_hash_report_none() {
+        assert_eq!(published_sha256("- 只有文字说明"), None);
+    }
 }
