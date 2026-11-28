@@ -261,9 +261,9 @@ MCP listening on http://127.0.0.1:3780/mcp?token=9f2c1d...（32 位随机串）
 | --- | --- |
 | `zero-scanner.exe` | 图形界面 |
 | `zero-scanner.exe --mcp <port>` | 无界面启动 MCP 服务（不写端口默认 3777） |
-| `zero-scanner.exe --selftest` | 跑 203 项自检，结论写 `selftest.log`，退出码即结果 |
+| `zero-scanner.exe --selftest` | 跑 217 项自检，结论写 `selftest.log`，退出码即结果 |
 | `zero-scanner.exe --verify <pid>` | 对目标进程做 8 项可用性验证 |
-| `zero-scanner.exe --e2e <pid> [info]` | 23 项端到端验证（配合 `e2e_target.py`） |
+| `zero-scanner.exe --e2e <pid> [info]` | 24 项端到端验证（配合 `e2e_target.py`） |
 | `zero-scanner.exe --screenshot <png> --tab <名字>` | 渲染某个页面为 PNG（界面回归用，加 `--settings` 连设置弹窗一起） |
 | `zero-scanner.exe --update-check` | 查最新发布并打印结论，不打开界面 |
 | `zero-scanner.exe --update-download <目录>` | 走一遍真实下载，落到指定目录（校验用） |
@@ -343,7 +343,7 @@ MCP listening on http://127.0.0.1:3780/mcp?token=9f2c1d...（32 位随机串）
 │     ├─ session.rs      工作区持久化
 │     ├─ hotkey.rs       快捷键
 │     ├─ mcp.rs          MCP 服务
-│     ├─ selftest.rs     203 项自检
+│     ├─ selftest.rs     217 项自检
 │     ├─ e2e.rs          端到端验证
 │     └─ model.rs        值类型与扫描类型
 └─ e2e_target.py         端到端测试目标进程
@@ -383,10 +383,10 @@ bash installer/build.sh
 两条独立的证据线：**断言管逻辑，截图管渲染**。
 
 ```bash
-# 203 项自检：扫描 / 指针 / 反汇编 / 补丁 / 汇编 / CT / 分诊 / Lua / 更新 / 热图 / 调试 …
+# 217 项自检：扫描 / 指针 / 反汇编 / 补丁 / 汇编 / CT / 分诊 / Lua / 更新 / 热图 / 调试 …
 zero-scanner.exe --selftest
 
-# 23 项端到端：起一个真实目标进程，把整条链路跑一遍
+# 24 项端到端：起一个真实目标进程，把整条链路跑一遍
 python e2e_target.py
 zero-scanner.exe --e2e <pid> e2e_target.info
 ```
