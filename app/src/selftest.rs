@@ -1846,6 +1846,41 @@ pub fn run() -> bool {
         }
         std::fs::remove_file(&info).ok();
     }
+    // Heat map -> scan: hot areas must be the changed pages only, so the
+    // "scan only hot pages" toggle is a real narrowing and not a relabel.
+    {
+        let mut cell = [0u8; 64];
+        let base = cell.as_mut_ptr() as u64;
+        let region = crate::model::Region {
+            base,
+            size: 64,
+            writable: true,
+            executable: false,
+        };
+        if let Ok(handle) = winmem::open_process(std::process::id(), "self") {
+            let mut map = crate::heat::HeatMap::new();
+            map.adopt(&[region]);
+            map.sample(&handle);
+            check!(
+                map.hot_areas(0.01).is_empty(),
+                "heat: a fresh baseline offers no hot pages to scan"
+            );
+            cell[0] = 0xAA;
+            cell[1] = 0xBB;
+            map.sample(&handle);
+            let hot = map.hot_areas(0.01);
+            check!(
+                hot.len() == 1 && hot[0].base == base,
+                "heat: the changed page is the one offered to a scan ({} pages)",
+                hot.len()
+            );
+            check!(
+                hot.iter().all(|r| r.writable),
+                "heat: hot pages stay marked writable so a scan can use them"
+            );
+        }
+    }
+
     // Hit-to-NOP: a hit record carries the instruction bytes it executed, so
     // the patch length must come from decoding those bytes, not from the
     // text form. Decode the exact sequence the dbg-test loop writes and

@@ -251,6 +251,9 @@ pub struct ZeroApp {
     /// Seconds between passes. Shorter is more accurate and more expensive.
     pub heat_interval: f32,
     pub heat_last: Option<Instant>,
+    /// Scan only the pages the heat map saw change. Turns the map from a
+    /// curiosity into a shortcut: the first scan stops walking dead weight.
+    pub scan_hot_only: bool,
 
     pub workspace_path: String,
     pub show_hotkeys: bool,
@@ -390,6 +393,7 @@ impl ZeroApp {
             heat_on: false,
             heat_interval: 1.0,
             heat_last: None,
+            scan_hot_only: false,
             workspace_path: workspace_path(),
             show_hotkeys: false,
             mcp: None,
@@ -927,7 +931,20 @@ impl ZeroApp {
             self.toast("范围扫描需要第二个数值。", ToastKind::Warn);
             return;
         }
-        let regions = handle.regions(self.writable_only);
+        let mut regions = handle.regions(self.writable_only);
+        if self.scan_hot_only {
+            // Only the pages that moved since the last pass. Falling back to
+            // the full set would silently make the toggle a no-op.
+            let hot = self.heat.hot_areas(0.01);
+            if hot.is_empty() {
+                self.toast(
+                    "热图里还没有变化的页。先到「内存热图」开始观察，等一两遍采样。",
+                    ToastKind::Warn,
+                );
+                return;
+            }
+            regions = hot;
+        }
         if regions.is_empty() {
             self.toast(
                 "没有可扫描的内存区域。试试关闭「只扫描可写内存」。",

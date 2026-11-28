@@ -1085,6 +1085,25 @@ impl ZeroApp {
                 ui.checkbox(&mut self.fast, "快速扫描");
                 ui.checkbox(&mut self.writable_only, "仅可写内存");
             });
+            // Hot-region scoping: only meaningful once the heat map has seen
+            // movement, so the label states that instead of pretending it
+            // always helps.
+            let hot_pages = self.heat.hot_areas(0.01).len();
+            ui.add_space(4.0);
+            ui.horizontal(|ui| {
+                ui.add_enabled_ui(hot_pages > 0, |ui| {
+                    ui.checkbox(&mut self.scan_hot_only, "只扫热区");
+                });
+                ui.label(
+                    egui::RichText::new(if hot_pages > 0 {
+                        format!("热图里有 {hot_pages} 个页在变")
+                    } else {
+                        "热图还没采到变化页".to_string()
+                    })
+                    .size(10.5)
+                    .color(theme::faint()),
+                );
+            });
             // One-click health check against whatever is attached: proves the
             // engine works on this specific process without a special target.
             ui.add_space(6.0);
@@ -1517,6 +1536,14 @@ impl ZeroApp {
                     }
                     if theme::outline_button(ui, "重新采样区域", true).clicked() {
                         rescan = true;
+                    }
+                    // Jump straight from "these pages are moving" to "scan only
+                    // them". The scan page owns the toggle, so this sets it and
+                    // switches tabs instead of duplicating scan controls here.
+                    let hot = self.heat.hot_areas(0.01).len();
+                    if theme::outline_button(ui, "用热区扫一次", hot > 0).clicked() && hot > 0 {
+                        self.scan_hot_only = true;
+                        self.tab = Tab::Scan;
                     }
                 }
             });

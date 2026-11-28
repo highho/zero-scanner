@@ -98,6 +98,23 @@ impl HeatMap {
         self.regions.len()
     }
 
+    /// The hot regions themselves, for feeding a scan. A region that has not
+    /// moved since the last pass is left out: the point of the map is to make
+    /// the scan shorter, and a quiet page is exactly what to skip.
+    pub fn hot_areas(&self, threshold: f32) -> Vec<Region> {
+        self.last
+            .regions
+            .iter()
+            .filter(|r| r.heat >= threshold && r.heat > 0.0)
+            .map(|r| Region {
+                base: r.base,
+                size: r.size,
+                writable: true,
+                executable: false,
+            })
+            .collect()
+    }
+
     pub fn last(&self) -> &Pass {
         &self.last
     }
