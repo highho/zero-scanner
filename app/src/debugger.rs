@@ -548,43 +548,64 @@ fn apply_slots_thread(
 }
 
 
+/// GetThreadContext / SetThreadContext 要求 CONTEXT 缓冲区按 16 字节对齐。
+/// 直接用栈上局部变量时编译器只保证 8 字节对齐，栈帧布局一变就可能落到
+/// 非 16 字节边界，API 立刻返回 998（ERROR_NOACCESS）——这正是「换个构建
+/// 断点就全不命中、stash 回去又好了」的根因。用显式对齐的包装类型兜住，
+/// 让对齐成为类型属性而不是运气。
+#[repr(C, align(16))]
+struct AlignedX64(CONTEXT);
+
+#[repr(C, align(16))]
+struct AlignedX86(WOW64_CONTEXT);
+
+fn x64_get(handle: HANDLE, flags: u32) -> Option<CONTEXT> {
+    let mut holder = AlignedX64(unsafe { std::mem::zeroed() });
+    holder.0.ContextFlags = flags;
+    if unsafe { GetThreadContext(handle, &mut holder.0) } == 0 {
+        None
+    } else {
+        Some(holder.0)
+    }
+}
+
+fn x64_set(handle: HANDLE, flags: u32, ctx: &CONTEXT) -> bool {
+    let mut holder = AlignedX64(*ctx);
+    holder.0.ContextFlags = flags;
+    unsafe { SetThreadContext(handle, &mut holder.0) != 0 }
+}
+
+fn x86_get(handle: HANDLE, flags: u32) -> Option<WOW64_CONTEXT> {
+    let mut holder = AlignedX86(unsafe { std::mem::zeroed() });
+    holder.0.ContextFlags = flags;
+    if unsafe { Wow64GetThreadContext(handle, &mut holder.0) } == 0 {
+        None
+    } else {
+        Some(holder.0)
+    }
+}
+
+fn x86_set(handle: HANDLE, flags: u32, ctx: &WOW64_CONTEXT) -> bool {
+    let mut holder = AlignedX86(*ctx);
+    holder.0.ContextFlags = flags;
+    unsafe { Wow64SetThreadContext(handle, &mut holder.0) != 0 }
+}
+
 /// 用已打开的线程句柄读上下文（调用方负责先挂起线程）。
 fn read_context_with(handle: HANDLE, is_64bit: bool) -> Option<SavedCtx> {
-    unsafe {
-        if is_64bit {
-            let mut ctx: CONTEXT = std::mem::zeroed();
-            ctx.ContextFlags = CONTEXT_DEBUG_REGISTERS_AMD64;
-            if GetThreadContext(handle, &mut ctx) == 0 {
-                return None;
-            }
-            Some(SavedCtx::X64(ctx))
-        } else {
-            let mut ctx: WOW64_CONTEXT = std::mem::zeroed();
-            ctx.ContextFlags = WOW64_CONTEXT_DEBUG_REGISTERS;
-            if Wow64GetThreadContext(handle, &mut ctx) == 0 {
-                return None;
-            }
-            Some(SavedCtx::X86(ctx))
-        }
+    if is_64bit {
+        x64_get(handle, CONTEXT_DEBUG_REGISTERS_AMD64).map(SavedCtx::X64)
+    } else {
+        x86_get(handle, WOW64_CONTEXT_DEBUG_REGISTERS).map(SavedCtx::X86)
     }
 }
 
 /// 用已打开的线程句柄写上下文（只提交调试寄存器子集）。
 fn write_context_with(handle: HANDLE, is_64bit: bool, ctx: &SavedCtx) -> bool {
-    unsafe {
-        match (ctx, is_64bit) {
-            (SavedCtx::X64(c), true) => {
-                let mut c = c.clone();
-                c.ContextFlags = CONTEXT_DEBUG_REGISTERS_AMD64;
-                SetThreadContext(handle, &c) != 0
-            }
-            (SavedCtx::X86(c), false) => {
-                let mut c = c.clone();
-                c.ContextFlags = WOW64_CONTEXT_DEBUG_REGISTERS;
-                Wow64SetThreadContext(handle, &c) != 0
-            }
-            _ => false,
-        }
+    match (ctx, is_64bit) {
+        (SavedCtx::X64(c), true) => x64_set(handle, CONTEXT_DEBUG_REGISTERS_AMD64, c),
+        (SavedCtx::X86(c), false) => x86_set(handle, WOW64_CONTEXT_DEBUG_REGISTERS, c),
+        _ => false,
     }
 }
 
@@ -608,10 +629,19 @@ fn apply_slot_to_all(
             )
         };
         if handle == 0 {
+            dbg_trace(format!(
+                "apply: OpenThread {} failed err={}",
+                thread.id,
+                unsafe { GetLastError() }
+            ));
             failed += 1;
             continue;
         }
-        unsafe { SuspendThread(handle) };
+        let suspended = unsafe { SuspendThread(handle) };
+        dbg_trace(format!(
+            "apply: thread {} suspend={:?}",
+            thread.id, suspended
+        ));
         let mut ok = false;
         if let Some(mut ctx) = read_context_with(handle, target.is_64bit) {
             if thread.original.is_none() {
@@ -619,6 +649,19 @@ fn apply_slot_to_all(
             }
             set_slot_dr(&mut ctx, index, address, kind);
             ok = write_context_with(handle, target.is_64bit, &ctx);
+            if !ok {
+                dbg_trace(format!(
+                    "apply: SetThreadContext {} failed err={}",
+                    thread.id,
+                    unsafe { GetLastError() }
+                ));
+            }
+        } else {
+            dbg_trace(format!(
+                "apply: GetThreadContext {} failed err={}",
+                thread.id,
+                unsafe { GetLastError() }
+            ));
         }
         unsafe { ResumeThread(handle) };
         unsafe { CloseHandle(handle) };
@@ -703,18 +746,11 @@ fn read_thread_context(target: &Arc<ProcessHandle>, thread_id: u32) -> Option<Sa
         return None;
     }
     let ctx = if target.is_64bit {
-        let mut context: CONTEXT = unsafe { std::mem::zeroed() };
-        context.ContextFlags = CONTEXT_ALL_AMD64;
-        let ok = unsafe { GetThreadContext(handle, &mut context) };
-        unsafe { CloseHandle(handle) };
-        if ok == 0 { None } else { Some(SavedCtx::X64(context)) }
+        x64_get(handle, CONTEXT_ALL_AMD64).map(SavedCtx::X64)
     } else {
-        let mut context: WOW64_CONTEXT = unsafe { std::mem::zeroed() };
-        context.ContextFlags = WOW64_CONTEXT_ALL;
-        let ok = unsafe { Wow64GetThreadContext(handle, &mut context) };
-        unsafe { CloseHandle(handle) };
-        if ok == 0 { None } else { Some(SavedCtx::X86(context)) }
+        x86_get(handle, WOW64_CONTEXT_ALL).map(SavedCtx::X86)
     };
+    unsafe { CloseHandle(handle) };
     ctx
 }
 
@@ -728,41 +764,19 @@ fn write_thread_context(_target: &Arc<ProcessHandle>, thread_id: u32, ctx: &Save
     if handle == 0 {
         return false;
     }
-    let ok = match ctx {
-        SavedCtx::X64(context) => {
-            let mut copy = *context;
-            copy.ContextFlags = CONTEXT_DEBUG_REGISTERS_AMD64;
-            unsafe { SetThreadContext(handle, &copy) }
-        }
-        SavedCtx::X86(context) => {
-            let mut copy = *context;
-            copy.ContextFlags = WOW64_CONTEXT_DEBUG_REGISTERS;
-            unsafe { Wow64SetThreadContext(handle, &copy) }
-        }
-    };
+    let ok = write_context_with(handle, _target.is_64bit, ctx);
     unsafe { CloseHandle(handle) };
-    ok != 0
+    ok
 }
 
-fn write_thread_context_saved(thread_id: u32, original: &SavedCtx) -> bool {
+fn write_thread_context_saved(is_64bit: bool, thread_id: u32, original: &SavedCtx) -> bool {
     let handle = unsafe { OpenThread(THREAD_GET_CONTEXT | THREAD_SET_CONTEXT, 0, thread_id) };
     if handle == 0 {
         return false;
     }
-    let ok = match original {
-        SavedCtx::X64(context) => {
-            let mut copy = *context;
-            copy.ContextFlags = CONTEXT_DEBUG_REGISTERS_AMD64;
-            unsafe { SetThreadContext(handle, &copy) }
-        }
-        SavedCtx::X86(context) => {
-            let mut copy = *context;
-            copy.ContextFlags = WOW64_CONTEXT_DEBUG_REGISTERS;
-            unsafe { Wow64SetThreadContext(handle, &copy) }
-        }
-    };
+    let ok = write_context_with(handle, is_64bit, original);
     unsafe { CloseHandle(handle) };
-    ok != 0
+    ok
 }
 
 fn handle_hit(

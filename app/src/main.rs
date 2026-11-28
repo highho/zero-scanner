@@ -26,6 +26,7 @@ mod speed;
 mod structs;
 mod syms;
 mod theme;
+mod trainer;
 mod triage;
 mod ui;
 mod update;
@@ -173,6 +174,29 @@ fn main() -> eframe::Result<()> {
             }
             Err(error) => {
                 eprintln!("{error}");
+                std::process::exit(1);
+            }
+        }
+    }
+    if let Some(pos) = args.iter().position(|a| a == "--apply-table") {
+        // Trainer mode: no window, apply the table, wait for Ctrl+C, restore.
+        let path = match args.get(pos + 1) {
+            Some(value) => PathBuf::from(value),
+            None => {
+                eprintln!("--apply-table 需要一个 .ct 路径");
+                std::process::exit(2);
+            }
+        };
+        let pid = args
+            .iter()
+            .position(|a| a == "--pid")
+            .and_then(|at| args.get(at + 1))
+            .and_then(|value| value.parse::<u32>().ok());
+        trainer::install_stop_handler();
+        match trainer::run(&path, pid) {
+            Ok(()) => std::process::exit(0),
+            Err(e) => {
+                eprintln!("{e}");
                 std::process::exit(1);
             }
         }

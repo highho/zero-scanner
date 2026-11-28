@@ -576,6 +576,98 @@ pub fn run() -> bool {
             "a blank workspace counts as empty and is not saved"
         );
     }
+    // Trainer export: every entry is proven writable and restorable before it
+    // is written into the exported table, and the launcher points at this exe.
+    {
+        use crate::ctable::{CtEntry, CtTable};
+        use crate::trainer;
+        // A table whose address is a plain hex number works against ourselves.
+        let mut cell: [u8; 8] = [0u8; 8];
+        let cell_addr = cell.as_mut_ptr() as u64;
+        let table = CtTable {
+            entries: vec![
+                CtEntry {
+                    description: "self cell".to_string(),
+                    vtype: VType::I32,
+                    address: format!("{cell_addr:X}"),
+                    value: Some("1234".to_string()),
+                    active: true,
+                },
+                // A deliberately impossible address must be reported, not dropped.
+                CtEntry {
+                    description: "bad address".to_string(),
+                    vtype: VType::I32,
+                    address: "0".to_string(),
+                    value: Some("1".to_string()),
+                    active: true,
+                },
+            ],
+            raw: String::new(),
+        };
+        let dir = std::env::temp_dir().join("zero-trainer-selftest");
+        let _ = std::fs::remove_dir_all(&dir);
+        let exe = std::env::current_exe().unwrap_or_else(|_| std::path::PathBuf::from("zero-scanner.exe"));
+        match trainer::export(&table, &handle, &dir, &exe) {
+            Ok(export) => {
+                check!(
+                    export.ready == 1,
+                    "trainer export keeps the entries that can actually work ({})",
+                    export.ready
+                );
+                check!(
+                    export.skipped.len() == 1,
+                    "trainer export reports the entry it cannot use ({:?})",
+                    export.skipped
+                );
+                check!(
+                    export.table_path.exists() && export.launcher_path.exists(),
+                    "trainer export wrote both the table and the launcher"
+                );
+                let launcher = std::fs::read_to_string(&export.launcher_path).unwrap_or_default();
+                check!(
+                    launcher.contains("--apply-table"),
+                    "the launcher calls this executable with --apply-table"
+                );
+                // The exported table must read back with the same entries.
+                let xml = std::fs::read_to_string(&export.table_path).unwrap_or_default();
+                match crate::ctable::parse(&xml) {
+                    Ok(back) => check!(
+                        back.entries.len() == 1
+                            && back.entries[0].value.as_deref() == Some("1234"),
+                        "the exported table parses back to the same single entry"
+                    ),
+                    Err(e) => {
+                        ok = false;
+                        log.push_str(&format!("FAIL  reparse exported table: {e}\n"));
+                    }
+                }
+                // check_entry is a dry run: after it, memory must be untouched.
+                let mut probe = [0u8; 4];
+                check!(
+                    handle.read(cell_addr, &mut probe) && probe == [0u8, 0, 0, 0],
+                    "checking an entry leaves the target untouched"
+                );
+                let _ = std::fs::remove_dir_all(&dir);
+            }
+            Err(e) => {
+                ok = false;
+                log.push_str(&format!("FAIL  trainer export: {e}\n"));
+            }
+        }
+        // Values encode the way the target reads them.
+        check!(
+            trainer::encode_value(VType::I32, "-1").ok() == Some(vec![0xFF, 0xFF, 0xFF, 0xFF]),
+            "a negative integer encodes as two's complement"
+        );
+        check!(
+            trainer::encode_value(VType::F32, "1.5").ok() == Some(1.5f32.to_le_bytes().to_vec()),
+            "a float encodes little-endian"
+        );
+        check!(
+            trainer::encode_value(VType::I32, "not a number").is_err(),
+            "a bad value is rejected with an error, not written as zero"
+        );
+    }
     // Lua: a real runtime, real host functions, real memory access.
     {
         use crate::lua as script;
