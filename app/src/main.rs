@@ -2,6 +2,7 @@
 
 mod aob;
 mod addr;
+mod aliases;
 mod assembler;
 mod ctable;
 mod debugger;

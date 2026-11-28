@@ -494,6 +494,30 @@ fn tool_definitions() -> Vec<Json> {
             }
         }),
         json!({
+            "name": "zero_aliases",
+            "description": "管理地址别名：给地址起个名字，之后所有地址框都能用这个名字（含指针链 game.exe+0x10,0x18）。action=list 列出、set 新增或改名、remove 删除。",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "action": { "type": "string", "description": "list（默认）/ set / remove" },
+                    "name": { "type": "string", "description": "别名，字母或下划线开头" },
+                    "expression": { "type": "string", "description": "别名指向的地址表达式" }
+                },
+                "required": ["action"]
+            }
+        }),
+        json!({
+            "name": "zero_symbols",
+            "description": "列出已加载模块的导出/导入符号，或把一个地址反查成最近的导出名（module!Name+0x12）。module 省略时查所有模块的导出。",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "module": { "type": "string", "description": "模块名，例如 game.exe；省略则汇总所有模块" },
+                    "address": { "type": "string", "description": "反查这个地址最近的导出符号（十六进制）" },
+                    "limit": { "type": "integer", "description": "最多返回多少条，默认 40" }
+                }
+            }
+        }),        json!({
             "name": "zero_dbg_start",
             "description": "对当前进程设硬件写入/读写断点，回答「谁在改这个地址」。会话式：start 之后去游戏里改值，再调 zero_dbg_hits 读命中。再次 start 会先停掉上一个。",
             "inputSchema": {
@@ -955,6 +979,111 @@ fn call_tool(name: &str, args: &Json, engine: &Arc<Mutex<Engine>>) -> Result<Str
             let mut guard = engine.lock().map_err(|_| "引擎状态不可用".to_string())?;
             guard.addresses.push((description.clone(), address, vtype));
             Ok(format!("已添加 {address:016X}（{description}）"))
+        }
+        "zero_aliases" => {
+            let action = args.get("action").and_then(|a| a.as_str()).unwrap_or("list");
+            match action {
+                "list" => {
+                    let list = crate::aliases::list();
+                    if list.is_empty() {
+                        return Ok("还没有别名。用 action=set 加一个。".to_string());
+                    }
+                    let mut text = String::new();
+                    for alias in list {
+                        text.push_str(&format!("{} = {}\n", alias.name, alias.expression));
+                    }
+                    Ok(text)
+                }
+                "set" => {
+                    let name = args
+                        .get("name")
+                        .and_then(|n| n.as_str())
+                        .ok_or_else(|| "set 需要 name".to_string())?;
+                    let expression = args
+                        .get("expression")
+                        .and_then(|e| e.as_str())
+                        .ok_or_else(|| "set 需要 expression".to_string())?;
+                    crate::aliases::add(name, expression)?;
+                    Ok(format!("别名已记下：{name} = {expression}"))
+                }
+                "remove" => {
+                    let name = args
+                        .get("name")
+                        .and_then(|n| n.as_str())
+                        .ok_or_else(|| "remove 需要 name".to_string())?;
+                    if crate::aliases::remove(name) {
+                        Ok(format!("已删除别名 {name}"))
+                    } else {
+                        Err(format!("没有别名 {name}"))
+                    }
+                }
+                other => Err(format!("未知 action：{other}（list / set / remove）")),
+            }
+        }
+        "zero_symbols" => {
+            let handle = engine_handle(engine)?;
+            let modules = handle.modules();
+            // Reverse lookup first: one address, one answer.
+            if let Some(text) = args.get("address").and_then(|a| a.as_str()) {
+                let address = crate::addr::resolve(Some(&handle), &modules, text)
+                    .ok_or_else(|| format!("无法解析地址「{text}」"))?;
+                let mut best: Option<String> = None;
+                for module in &modules {
+                    if !module.contains(address) {
+                        continue;
+                    }
+                    if let Ok(table) = crate::syms::parse(&handle, module) {
+                        if let Some(name) = table.nearest(address) {
+                            best = Some(name);
+                        }
+                    }
+                }
+                return Ok(match best {
+                    Some(name) => format!("{address:016X} 最近导出：{name}"),
+                    None => format!("{address:016X} 没有落在任何导出上（或模块没有导出表）。"),
+                });
+            }
+            let limit = args
+                .get("limit")
+                .and_then(|l| l.as_u64())
+                .unwrap_or(40)
+                .clamp(1, 200) as usize;
+            let wanted = args
+                .get("module")
+                .and_then(|m| m.as_str())
+                .map(|m| m.to_ascii_lowercase());
+            let mut text = String::new();
+            let mut shown = 0usize;
+            for module in &modules {
+                if let Some(name) = &wanted {
+                    if module.name.to_ascii_lowercase() != *name {
+                        continue;
+                    }
+                }
+                let Ok(table) = crate::syms::parse(&handle, module) else {
+                    continue;
+                };
+                if table.exports.is_empty() && table.imports.is_empty() {
+                    continue;
+                }
+                text.push_str(&format!(
+                    "{} ({} 导出, {} 导入)\n",
+                    table.module,
+                    table.exports.len(),
+                    table.import_count()
+                ));
+                for sym in table.exports.iter().take(limit.saturating_sub(shown)) {
+                    text.push_str(&format!("  {:016X}  {}\n", sym.address, sym.name));
+                    shown += 1;
+                }
+                if shown >= limit {
+                    break;
+                }
+            }
+            if text.is_empty() {
+                return Ok("没有找到符号：模块可能没有导出表，或名字没匹配上。".to_string());
+            }
+            Ok(text)
         }
         "zero_dbg_start" => {
             let handle = engine_handle(engine)?;

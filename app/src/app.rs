@@ -2402,6 +2402,7 @@ impl ZeroApp {
             table_entries,
             watches,
             pointer_maps,
+            aliases: crate::aliases::list(),
             table_path: self.ct_path.clone(),
             script_source: self.script_source.clone(),
             asm_source: self.asm_source.clone(),
@@ -2429,6 +2430,12 @@ impl ZeroApp {
         let workspace = session::load(&path);
         if workspace.is_empty() {
             return 0;
+        }
+        // Aliases are global to the session, so restoring replaces the table
+        // rather than merging: the saved set is the truth for this workspace.
+        crate::aliases::clear();
+        for alias in &workspace.aliases {
+            let _ = crate::aliases::add(&alias.name, &alias.expression);
         }
         for (index, saved) in workspace.entries.iter().enumerate() {
             let id = self.next_entry_id + index as u64;

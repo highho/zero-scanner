@@ -117,6 +117,9 @@ pub struct Workspace {
     pub table_entries: Vec<SavedTableEntry>,
     pub watches: Vec<SavedWatch>,
     pub pointer_maps: Vec<SavedPointerMap>,
+    /// User-chosen names for addresses, so "hp" keeps meaning the same thing
+    /// across sessions even after the module base moves.
+    pub aliases: Vec<crate::aliases::Alias>,
     pub table_path: String,
     pub script_source: String,
     pub asm_source: String,
@@ -132,6 +135,7 @@ impl Workspace {
             && self.table_entries.is_empty()
             && self.watches.is_empty()
             && self.pointer_maps.iter().all(|m| m.paths.is_empty())
+            && self.aliases.is_empty()
             && self.script_source.trim().is_empty()
             && self.asm_source.trim().is_empty()
     }

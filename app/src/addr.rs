@@ -28,7 +28,10 @@ pub fn resolve(
     modules: &[ModuleInfo],
     text: &str,
 ) -> Option<u64> {
-    let text = text.trim();
+    // Aliases are user-chosen names; expand them before parsing so a name
+    // works in every address box that already accepts expressions.
+    let expanded = crate::aliases::expand(text);
+    let text = expanded.trim();
     if text.is_empty() {
         return None;
     }

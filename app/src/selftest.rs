@@ -446,6 +446,49 @@ pub fn run() -> bool {
                 names.len()
             );
         }
+        // Aliases: a user-chosen name must work anywhere an expression works,
+        // and it must survive a save/load round-trip.
+        {
+            use crate::aliases;
+            aliases::clear();
+            check!(
+                aliases::add("hp", "game.exe+0x4A0C8").is_ok(),
+                "an alias can be registered"
+            );
+            check!(
+                aliases::add("1bad", "0x1000").is_err(),
+                "an alias name must be a single token"
+            );
+            check!(
+                aliases::add("hp", "game.exe+0x4A0D0").is_ok() && aliases::list().len() == 1,
+                "redefining an alias replaces it instead of duplicating"
+            );
+            check!(
+                aliases::expand("hp,0x10") == "game.exe+0x4A0D0,0x10",
+                "an alias expands inside a pointer chain ({})",
+                aliases::expand("hp,0x10")
+            );
+            let modules = vec![crate::winmem::ModuleInfo {
+                name: "game.exe".to_string(),
+                base: 0x1_4000_0000,
+                size: 0x10_0000,
+            }];
+            check!(
+                crate::addr::resolve(None, &modules, "hp") == Some(0x1_4004_A0D0),
+                "an alias resolves through the normal address parser"
+            );
+            check!(aliases::remove("hp") && aliases::list().is_empty(), "an alias can be removed");
+            aliases::clear();
+        }
+        // The two new MCP tools must be declared, or an agent cannot use them.
+        for expected in ["zero_aliases", "zero_symbols"] {
+            check!(
+                names.iter().any(|n| n == expected),
+                "MCP exposes {} ({})",
+                expected,
+                names.len()
+            );
+        }
         {
             use crate::ctable;
             let mut table = ctable::CtTable::default();
