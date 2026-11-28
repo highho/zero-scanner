@@ -1128,6 +1128,36 @@ pub fn run() -> bool {
             ids.len()
         );
     }
+    // Attach diagnostics: the same failure must produce the same advice in the
+    // picker, the debugger and MCP, and the code must survive for unknown ones.
+    {
+        use crate::diag;
+        diag::clear_last();
+        check!(diag::last().is_none(), "no diagnosis is remembered before any failure");
+        let denied = diag::for_open_process(5);
+        diag::remember(&denied);
+        let recalled = diag::last();
+        check!(
+            recalled.as_ref().map(|d| d.line()) == Some(denied.line()),
+            "the remembered diagnosis is the one the picker showed ({:?})",
+            recalled.map(|d| d.summary)
+        );
+        check!(
+            denied.action.contains("管理员"),
+            "access denied points at running as administrator ({})",
+            denied.action
+        );
+        check!(
+            diag::for_debug_attach(299).action.contains("调试器"),
+            "already-debugged points at the other debugger"
+        );
+        check!(
+            diag::for_open_process(1234).summary.contains("1234"),
+            "an unknown code keeps its number so it can be reported"
+        );
+        diag::clear_last();
+        check!(diag::last().is_none(), "a successful attach clears the last failure");
+    }
     // Memory heat map: sample our own process twice and prove it notices a
     // write, and only counts the bytes that actually moved.
     {
@@ -1815,6 +1845,26 @@ pub fn run() -> bool {
             }
         }
         std::fs::remove_file(&info).ok();
+    }
+    // Hit-to-NOP: a hit record carries the instruction bytes it executed, so
+    // the patch length must come from decoding those bytes, not from the
+    // text form. Decode the exact sequence the dbg-test loop writes and
+    // check the NOP sled covers one instruction.
+    {
+        let bytes = [0x48u8, 0x83, 0xC4, 0x48, 0x90, 0x90];
+        let decoded = crate::disasm::decode(&bytes, 0x1400_0000, true);
+        check!(
+            decoded.is_some() && decoded.as_ref().unwrap().length == 4,
+            "hit NOP decodes the recorded instruction to its true length (len={:?})",
+            decoded.map(|i| i.length)
+        );
+        let trailing = [0x90u8, 0x90];
+        let decoded_trailing = crate::disasm::decode(&trailing, 0x1400_0000, true);
+        check!(
+            decoded_trailing.is_some() && decoded_trailing.as_ref().unwrap().length == 1,
+            "hit NOP leaves the padding alone (len={:?})",
+            decoded_trailing.map(|i| i.length)
+        );
     }
     log.push_str(if ok { "\nRESULT: PASS\n" } else { "\nRESULT: FAIL\n" });
     std::fs::write("selftest.log", log).ok();

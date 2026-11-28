@@ -613,7 +613,15 @@ fn call_tool(name: &str, args: &Json, engine: &Arc<Mutex<Engine>>) -> Result<Str
             let Some((pid, label)) = resolved else {
                 return Err("没有找到这个进程".to_string());
             };
-            let handle = winmem::open_process(pid, &label)?;
+            let handle = winmem::open_process(pid, &label).map_err(|e| {
+                // The same diagnosis the picker shows, so a failure reported over
+                // MCP is actionable without re-explaining the error code.
+                match crate::diag::last() {
+                    Some(d) => format!("{e}\n下一步：{}", d.action),
+                    None => e,
+                }
+            })?;
+            crate::diag::clear_last();
             let summary = format!(
                 "已连接 {}（PID {}，{}，{}）",
                 handle.name,

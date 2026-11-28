@@ -321,7 +321,9 @@ fn debug_loop(
     if unsafe { DebugActiveProcess(pid) } == 0 {
         let code = unsafe { GetLastError() };
         // 诊断表统一：界面和 MCP 看到同一句结论和同一个下一步。
-        let message = format!("附加调试失败（系统错误 {code}）：{}", crate::diag::for_debug_attach(code).line());
+        let diagnosis = crate::diag::for_debug_attach(code);
+        crate::diag::remember(&diagnosis);
+        let message = format!("附加调试失败（系统错误 {code}）：{}", diagnosis.line());
         if let Ok(mut s) = shared.lock() {
             s.error = Some(message.clone());
         }
