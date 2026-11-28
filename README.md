@@ -25,10 +25,12 @@
 
 | 文件 | 说明 |
 | --- | --- |
+| [`zero-scanner-1.0.0-setup-x64.exe`](https://github.com/highho/zero-scanner/releases/latest) | 安装版：**不需要管理员权限**，装进用户目录，带桌面 / 开始菜单快捷方式与卸载项 |
 | [`zero-scanner.exe`](https://github.com/highho/zero-scanner/releases/latest) | 便携版，单文件，双击即用 |
 | [`zero-scanner-v1.0.0-windows.zip`](https://github.com/highho/zero-scanner/releases/latest) | 同一份 exe + 说明文档与界面截图 |
 
-- **免安装、无外部运行时**：Lua 5.4 通过 `mlua` 的 vendored feature 静态编进二进制，不需要另装 Lua，也不用装任何运行库。
+- **三种拿法，一个二进制**：便携版直接跑；zip 解压即用；安装版会装到 `%LOCALAPPDATA%\Programs\Zero`，写开始菜单和桌面快捷方式，卸载时**保留你的 `zero-workspace.json`**（地址列表、补丁记录都在里面）。
+- **无外部运行时**：Lua 5.4 通过 `mlua` 的 vendored feature 静态编进二进制，不需要另装 Lua，也不用装任何运行库。
 - **只支持 Windows 10 / 11 x64**。
 - 权限要跟得上目标：游戏以管理员身份运行时，Zero 也要以管理员身份运行，否则打不开进程。
 
@@ -277,6 +279,16 @@ cargo build --release
 ```
 
 仓库里提交了 `Cargo.lock`，构建结果是可复现的。第一次构建要编 vendored Lua，会比之后慢一些。
+
+打包成安装程序（可选，需要 [NSIS](https://nsis.sourceforge.io/Download) 3.x 的 `makensis` 在 `PATH` 上）：
+
+```bash
+cp app/target/release/zero-scanner.exe dist/
+bash installer/build.sh
+# 产物：dist/zero-scanner-1.0.0-setup-x64.exe
+```
+
+安装逻辑在 [`installer/Zero.nsi`](installer/Zero.nsi)（版本号在这里改），图标是 [`installer/zero.ico`](installer/zero.ico)。安装包默认装到用户目录、申请的是用户级权限，所以整个流程不用弹 UAC。
 
 ## 测试与验证
 
