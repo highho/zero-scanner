@@ -582,6 +582,7 @@ impl ZeroApp {
 
         // 命中历史
         ui.add_space(8.0);
+        let mut nop_hit: Option<(u64, Vec<u8>)> = None;
         theme::card_frame().show(ui, |ui| {
             ui.set_width(ui.available_width());
             theme::section_label(ui, "命中历史");
@@ -612,6 +613,11 @@ impl ZeroApp {
                                 .color(theme::text()),
                         );
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            let rip = rec.rip;
+                            let insn_bytes = rec.bytes.clone();
+                            if theme::outline_button(ui, "NOP 这条指令", true).clicked() {
+                                nop_hit = Some((rip, insn_bytes));
+                            }
                             ui.label(
                                 egui::RichText::new(format!(
                                     "线程 {} · 写后 {}",
@@ -637,6 +643,9 @@ impl ZeroApp {
                 ui.add_space(4.0);
             }
         });
+        if let Some((rip, insn_bytes)) = nop_hit {
+            self.patch_hit(rip, &insn_bytes);
+        }
         // 本帧结束时没再需要持续刷新：命中会由后台线程更新，UI 靠常规重绘即可。
         ui.ctx().request_repaint_after(Duration::from_millis(500));
     }

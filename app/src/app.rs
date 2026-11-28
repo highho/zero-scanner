@@ -3166,6 +3166,38 @@ impl ZeroApp {
         }
     }
 
+    /// NOP the instruction that a debugger hit blames. The hit recorded the
+    /// exact RIP and the instruction bytes it executed, so patching is one
+    /// reversible inj::apply — the same undo path as a manual patch.
+    pub fn patch_hit(&mut self, rip: u64, insn_bytes: &[u8]) {
+        let Some(handle) = self.process.clone() else {
+            self.toast("先连接一个进程。", ToastKind::Warn);
+            return;
+        };
+        // Decode from the recorded bytes so the NOP covers exactly one
+        // instruction — never a guess from the string form.
+        let len = disasm::decode(insn_bytes, rip, handle.is_64bit)
+            .map(|insn| insn.length)
+            .unwrap_or(0);
+        if len == 0 || len > 15 {
+            self.toast("这条指令的字节解不出来，先在反汇编页看一眼再手动补丁。", ToastKind::Warn);
+            return;
+        }
+        let bytes = vec![0x90u8; len];
+        let label = format!("命中 NOP @{rip:X}");
+        match inj::apply(&handle, rip, &bytes, &label) {
+            Ok(patch) => {
+                let n = patch.size();
+                self.inj_patches.push(patch);
+                self.toast(
+                    format!("已把 {rip:X} 的 {n} 字节指令 NOP 掉，可在补丁页还原"),
+                    ToastKind::Success,
+                );
+                self.save_workspace();
+            }
+            Err(e) => self.toast(e, ToastKind::Error),
+        }
+    }
     pub fn revert_patch(&mut self, index: usize) {
         let Some(handle) = self.process.clone() else {
             return;
