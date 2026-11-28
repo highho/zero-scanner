@@ -21,6 +21,7 @@ mod pointerscan;
 mod plugins;
 mod practice;
 mod prefs;
+mod rebase;
 mod scan;
 mod selftest;
 mod session;

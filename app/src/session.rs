@@ -23,6 +23,14 @@ pub struct SavedEntry {
     pub vtype: String,
     pub frozen: bool,
     pub value_text: String,
+    /// Module the address belonged to when it was saved, empty for a heap or
+    /// stack address. This is what makes the row survive a restart: the module
+    /// base moves with ASLR, the offset inside it does not.
+    #[serde(default)]
+    pub module: String,
+    /// Distance into that module. Meaningless while `module` is empty.
+    #[serde(default)]
+    pub module_offset: u64,
 }
 
 impl SavedEntry {
@@ -126,6 +134,41 @@ pub struct Workspace {
     pub aob_text: String,
     pub scan_value: String,
     pub last_tab: String,
+    /// Name of the process this workspace was last used with. Empty means the
+    /// user never attached, and nothing will be offered on the next launch.
+    #[serde(default)]
+    pub process_name: String,
+    /// The module table of that process when it was saved, so the next launch
+    /// can tell which addresses were anchored where without the old process
+    /// being alive.
+    #[serde(default)]
+    pub modules: Vec<SavedModule>,
+}
+
+/// One module row captured at save time.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct SavedModule {
+    pub name: String,
+    pub base: u64,
+    pub size: u64,
+}
+
+impl SavedModule {
+    pub fn to_module_info(&self) -> crate::winmem::ModuleInfo {
+        crate::winmem::ModuleInfo {
+            name: self.name.clone(),
+            base: self.base,
+            size: self.size,
+        }
+    }
+
+    pub fn from_module_info(info: &crate::winmem::ModuleInfo) -> Self {
+        Self {
+            name: info.name.clone(),
+            base: info.base,
+            size: info.size,
+        }
+    }
 }
 
 impl Workspace {
@@ -214,6 +257,8 @@ mod tests {
             vtype: "i32".to_string(),
             frozen: true,
             value_text: "9900".to_string(),
+            module: "game.exe".to_string(),
+            module_offset: 0x1234,
         });
         let text = to_string(&workspace).expect("serialise");
         let back = from_str(&text).expect("parse");
@@ -222,6 +267,38 @@ mod tests {
         assert!(back.patches[0].active);
         assert_eq!(back.entries[0].description, "玩家金币");
         assert_eq!(back.entries[0].vtype(), VType::I32);
+        assert_eq!(back.entries[0].module, "game.exe");
+        assert_eq!(back.entries[0].module_offset, 0x1234);
+    }
+
+    #[test]
+    fn an_old_workspace_without_anchors_still_loads() {
+        // Workspaces written before addresses carried a module anchor must keep
+        // loading: they simply have nothing to re-point.
+        let old = r#"{
+            "version": 1,
+            "entries": [
+                {"description": "金币", "address": 4096, "vtype": "i32",
+                 "frozen": false, "value_text": "10"}
+            ],
+            "patches": [],
+            "table_entries": [],
+            "watches": [],
+            "pointer_maps": [],
+            "aliases": [],
+            "table_path": "",
+            "script_source": "",
+            "asm_source": "",
+            "aob_text": "",
+            "scan_value": "",
+            "last_tab": "scan"
+        }"#;
+        let workspace = from_str(old).expect("old workspace parses");
+        assert_eq!(workspace.entries.len(), 1);
+        assert!(workspace.entries[0].module.is_empty());
+        assert_eq!(workspace.entries[0].module_offset, 0);
+        assert!(workspace.process_name.is_empty());
+        assert!(workspace.modules.is_empty());
     }
 
     #[test]

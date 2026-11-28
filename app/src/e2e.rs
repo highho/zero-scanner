@@ -372,6 +372,85 @@ pub fn run(pid: u32, info_path: &str) -> bool {
         Err(e) => report.check(false, "Lua script runs against the target", || e),
     }
 
+    // 会话恢复：把一个带模块锚点的地址列表写盘、读回、再按当前进程的模块表
+    // 重新指回去。用真实模块表做锚点，模块没了必须报失效而不是乱指。
+    report.stage("session restore");
+    {
+        use crate::rebase;
+        use crate::session;
+        let modules = handle.modules();
+        if let Some(module) = modules.first().cloned() {
+            let address = module.base + 0x1234;
+            let anchor = rebase::anchor(address, &modules);
+            report.check(
+                anchor.as_ref().map(|a| a.module.as_str()) == Some(module.name.as_str()),
+                "a saved address is anchored to the module that contains it",
+                || format!("anchor={anchor:?} module={}", module.name),
+            );
+            let dir = std::env::temp_dir().join("zero-e2e-reconnect");
+            let _ = std::fs::remove_dir_all(&dir);
+            let _ = std::fs::create_dir_all(&dir);
+            let file = dir.join("zero-workspace.json").to_string_lossy().to_string();
+            let mut workspace = session::Workspace::default();
+            workspace.process_name = handle.name.clone();
+            workspace.modules = modules
+                .iter()
+                .map(session::SavedModule::from_module_info)
+                .collect();
+            workspace.entries.push(session::SavedEntry {
+                description: "reconnect probe".to_string(),
+                address,
+                vtype: "i32".to_string(),
+                frozen: false,
+                value_text: "0".to_string(),
+                module: module.name.clone(),
+                module_offset: 0x1234,
+            });
+            match session::save(&file, &workspace) {
+                Ok(()) => {
+                    let back = session::load(&file);
+                    let saved = back.entries.first();
+                    report.check(
+                        saved.map(|e| e.module == module.name && e.module_offset == 0x1234)
+                            .unwrap_or(false),
+                        "the saved row keeps its module name and offset across a restart",
+                        || format!("entries={}", back.entries.len()),
+                    );
+                    report.check(
+                        back.process_name == handle.name,
+                        "the workspace remembers which program it was used against",
+                        || format!("process_name={:?}", back.process_name),
+                    );
+                    // 模拟重启：只剩存下来的锚点，模块表要重新拿。
+                    let live = handle.modules();
+                    let moved = saved
+                        .and_then(|e| {
+                            rebase::anchor(e.address, &back.modules.iter().map(|m| m.to_module_info()).collect::<Vec<_>>())
+                                .map(|a| (a, e))
+                        })
+                        .map(|(a, e)| rebase::rebase_anchored(&rebase::Anchored { module: e.module.clone(), offset: e.module_offset }, &live));
+                    report.check(
+                        moved.as_ref().map(|m| m.outcome.ok() && m.address == address).unwrap_or(false),
+                        "a stored anchor re-points to the same live address",
+                        || format!("{moved:?} expected {address:X}"),
+                    );
+                    let gone = rebase::rebase_anchored(
+                        &rebase::Anchored { module: "no-such-module.exe".to_string(), offset: 0x1234 },
+                        &live,
+                    );
+                    report.check(
+                        gone.outcome == rebase::RebaseOutcome::ModuleGone,
+                        "a module that is gone is reported, not guessed",
+                        || format!("{:?}", gone.outcome),
+                    );
+                }
+                Err(e) => report.check(false, "the workspace writes to disk", || e),
+            }
+            let _ = std::fs::remove_dir_all(&dir);
+        } else {
+            report.check(false, "the target exposes modules to anchor against", || "no modules".to_string());
+        }
+    }
     report.finish()
 }
 

@@ -1334,6 +1334,7 @@ impl ZeroApp {
         let mut unlock_all = false;
         let mut clear = false;
         let count = self.entries.len();
+        let stale_count = self.stale_entries.len();
 
         ui.horizontal(|ui| {
             ui.vertical(|ui| {
@@ -1353,6 +1354,13 @@ impl ZeroApp {
                     &format!("{count} 个地址"),
                     if count > 0 { theme::accent_2() } else { theme::faint() },
                 );
+                if stale_count > 0 {
+                    theme::status_chip(
+                        ui,
+                        &format!("{stale_count} 个失效"),
+                        theme::danger(),
+                    );
+                }
             });
         });
         ui.add_space(4.0);
@@ -1405,6 +1413,7 @@ impl ZeroApp {
                 .show_rows(ui, row_height, count, |ui, range| {
                     for i in range {
                         let entry = &self.entries[i];
+                        let stale = self.stale_entries.contains(&entry.id);
                         ui.horizontal(|ui| {
                             ui.add_space(4.0);
                             let mut active = entry.active;
@@ -1413,21 +1422,26 @@ impl ZeroApp {
                                 toggle = Some((entry.id, active));
                             }
                             cell_label(ui, 150.0, &entry.desc, false);
-                            cell_mono(ui, 158.0, &format!("0x{:X}", entry.address), theme::accent());
+                            cell_mono(
+                                ui,
+                                158.0,
+                                &format!("0x{:X}", entry.address),
+                                if stale { theme::danger() } else { theme::accent() },
+                            );
                             cell_tag(ui, 72.0, entry.vtype.short(), type_color(entry.vtype));
                             let current = entry
                                 .current
                                 .as_ref()
                                 .map(|v| v.display())
                                 .unwrap_or_else(|| "—".to_string());
-                            if cell_button(
-                                ui,
-                                130.0,
-                                &current,
-                                if entry.active { theme::success() } else { theme::text() },
-                            )
-                            .clicked()
-                            {
+                            let current_color = if stale {
+                                theme::danger()
+                            } else if entry.active {
+                                theme::success()
+                            } else {
+                                theme::text()
+                            };
+                            if cell_button(ui, 130.0, &current, current_color).clicked() {
                                 edit = Some(entry.id);
                             }
                             let prev = entry
@@ -1468,6 +1482,8 @@ impl ZeroApp {
         }
         if clear {
             self.entries.clear();
+            self.entry_anchors.clear();
+            self.stale_entries.clear();
             self.sync_freeze();
             self.toast("已清空地址列表。", ToastKind::Info);
         }
@@ -4917,6 +4933,13 @@ impl ZeroApp {
                             .size(10.5)
                             .color(theme::faint()),
                     );
+                    if !self.last_process_name.is_empty() && self.picker_search.is_empty() {
+                        theme::tag(
+                            ui,
+                            &format!("上次：{}", self.last_process_name),
+                            theme::accent_2(),
+                        );
+                    }
                 });
                 ui.add_space(6.0);
                 theme::divider(ui);
@@ -4929,7 +4952,10 @@ impl ZeroApp {
                     return;
                 }
                 let needle = self.picker_search.to_ascii_lowercase();
-                let filtered: Vec<usize> = self
+                // The program this workspace was last used against goes first:
+                // after a restart that is almost always the one to pick.
+                let last = self.last_process_name.to_ascii_lowercase();
+                let mut filtered: Vec<usize> = self
                     .processes
                     .iter()
                     .enumerate()
@@ -4940,6 +4966,12 @@ impl ZeroApp {
                     })
                     .map(|(i, _)| i)
                     .collect();
+                if !last.is_empty() {
+                    filtered.sort_by_key(|i| {
+                        let p = &self.processes[*i];
+                        !p.name.to_ascii_lowercase().eq(&last)
+                    });
+                }
                 if filtered.is_empty() {
                     ui.add_space(30.0);
                     ui.vertical_centered(|ui| {

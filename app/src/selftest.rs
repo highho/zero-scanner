@@ -577,6 +577,8 @@ pub fn run() -> bool {
             vtype: "i32".to_string(),
             frozen: true,
             value_text: "9900".to_string(),
+            module: "game.exe".to_string(),
+            module_offset: 0x1000,
         });
         let text = session::to_string(&workspace).expect("serialise workspace");
         match session::from_str(&text) {
@@ -659,6 +661,73 @@ pub fn run() -> bool {
                 log.push_str(&format!("FAIL  re-parse pointer map: {e}\n"));
             }
         }
+    }
+    // 会话恢复：模块基址随 ASLR 变、偏移不变。存下来的锚点必须能在新进程里
+    // 重新指回去，模块没了或变小了要明确说出来，不能悄悄指向别的东西。
+    {
+        use crate::rebase;
+        use crate::winmem::ModuleInfo;
+        let module = |name: &str, base: u64, size: u64| ModuleInfo {
+            name: name.to_string(),
+            base,
+            size,
+        };
+        let old = vec![
+            module("game.exe", 0x7_FF00_0000, 0x1000_0000),
+            module("engine.dll", 0x7_FE00_0000, 0x0080_0000),
+        ];
+        let address = 0x7_FF00_0000 + 0x2345;
+        let anchor = rebase::anchor(address, &old);
+        check!(
+            anchor.as_ref().map(|a| a.module.as_str()) == Some("game.exe"),
+            "rebase: an address inside a module is anchored to it"
+        );
+        // 重启后基址换了，偏移必须跟着走。
+        let moved = vec![
+            module("game.exe", 0x1_4000_0000, 0x1000_0000),
+            module("engine.dll", 0x1_3000_0000, 0x0080_0000),
+        ];
+        let result = anchor
+            .as_ref()
+            .map(|a| rebase::rebase_anchored(a, &moved))
+            .unwrap_or(rebase::Rebasing {
+                address,
+                outcome: rebase::RebaseOutcome::ModuleGone,
+            });
+        check!(
+            result.outcome.ok() && result.address == 0x1_4000_2345,
+            "rebase: a moved module keeps the offset ({:#X})",
+            result.address
+        );
+        // 模块没了：不能猜，要报出来。
+        let gone = vec![module("engine.dll", 0x1_3000_0000, 0x0080_0000)];
+        let result = anchor
+            .as_ref()
+            .map(|a| rebase::rebase_anchored(a, &gone))
+            .unwrap_or(rebase::Rebasing {
+                address,
+                outcome: rebase::RebaseOutcome::Ok,
+            });
+        check!(
+            result.outcome == rebase::RebaseOutcome::ModuleGone,
+            "rebase: a missing module is reported instead of guessed"
+        );
+        check!(
+            !result.outcome.detail("game.exe").is_empty(),
+            "rebase: every failure explains what to do next"
+        );
+        // 堆上的地址不属于任何模块，重连后原样保留。
+        check!(
+            rebase::anchor(0x0000_1234_5678, &old).is_none(),
+            "rebase: an address outside every module is left alone"
+        );
+        // 工作区往返：锚点必须一起存下去，否则重启就白记了。
+        let saved = crate::session::SavedModule::from_module_info(&old[0]);
+        let back = saved.to_module_info();
+        check!(
+            back.name == "game.exe" && back.base == 0x7_FF00_0000 && back.size == 0x1000_0000,
+            "rebase: a saved module keeps its name, base and size"
+        );
     }
     // Plugin capabilities: struct templates turn guessed fields into named ones,
     // and game profiles become presets on the scan page. Both must be honest

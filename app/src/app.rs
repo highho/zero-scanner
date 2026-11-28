@@ -13,6 +13,7 @@ use crate::lua as script;
 use crate::mcp;
 use crate::model::{format_bytes, parse_address, ScanHit, ScanType, VType, Value};
 use crate::pointerscan;
+use crate::rebase;
 use crate::scan::{self, ScanConfig, ScanHandle};
 use crate::smart::{self, SmartPlan};
 use crate::syms;
@@ -187,6 +188,17 @@ pub struct ZeroApp {
     pub dbg_error: Option<String>,
 
     pub entries: Vec<Entry>,
+    /// Module anchor per entry id, recorded when the row was restored from a
+    /// workspace. Kept beside the list instead of inside `Entry` so the twelve
+    /// places that build an Entry stay untouched.
+    pub entry_anchors: std::collections::HashMap<u64, rebase::Anchored>,
+    /// Rows whose stored module anchor could not be resolved after a reconnect.
+    /// They stay in the list so the address is not lost, but the list paints
+    /// them red instead of pretending the value is live.
+    pub stale_entries: std::collections::HashSet<u64>,
+    /// The program the current workspace was last used against. The picker
+    /// sorts it to the top instead of making the player hunt for it again.
+    pub last_process_name: String,
     pub next_entry_id: u64,
     pub editing: Option<EditState>,
     pub show_add: bool,
@@ -355,6 +367,9 @@ impl ZeroApp {
             show_ranked: true,
             last_scan_kind: String::new(),
             entries: Vec::new(),
+            entry_anchors: std::collections::HashMap::new(),
+        stale_entries: std::collections::HashSet::new(),
+        last_process_name: String::new(),
             next_entry_id: 1,
             editing: None,
             show_add: false,
@@ -508,6 +523,11 @@ impl ZeroApp {
                 Entry { id: 4, desc: "护甲".to_string(), address: 0x7FF6_A1B2_C3E0, vtype: VType::F32, active: false, value_text: "0.75".to_string(), current: Some(Value::Float(0.75)), previous: Some(Value::Float(0.75)) },
             ];
             app.next_entry_id = 5;
+            // 截图里要看到「上次连接的进程」和「重连后失效的行」两件事：
+            // 给两条行标失效，给选择器一个上次进程名。
+            app.last_process_name = "game.exe".to_string();
+            app.stale_entries.insert(2);
+            app.stale_entries.insert(4);
             app.selected_hit = Some(0);
             app.last_scan_kind = "首次 · 精确值".to_string();
             app.scan_phase = ScanPhase::Done;
@@ -872,6 +892,51 @@ impl ZeroApp {
         }
     }
 
+    /// Move restored addresses onto the new process's module table.
+    ///
+    /// Only rows with a recorded anchor move: a heap or stack address has no
+    /// base to move against, and quietly reusing the old absolute address would
+    /// point it at whatever now happens to live there. Every outcome is
+    /// reported once, so a failed re-point is never silent.
+    pub fn rebase_entries(&mut self, handle: &Arc<ProcessHandle>) {
+        if self.entry_anchors.is_empty() {
+            return;
+        }
+        let modules = handle.modules();
+        let mut moved = 0usize;
+        let mut lost = 0usize;
+        for entry in &mut self.entries {
+            let Some(anchor) = self.entry_anchors.get(&entry.id).cloned() else {
+                continue;
+            };
+            let result = rebase::rebase_anchored(&anchor, &modules);
+            entry.address = result.address;
+            if result.outcome.ok() {
+                moved += 1;
+                self.stale_entries.remove(&entry.id);
+            } else {
+                lost += 1;
+                self.stale_entries.insert(entry.id);
+            }
+        }
+        // Once moved, the live module table is the truth again: keeping the
+        // old anchors would re-apply a move that already happened.
+        self.entry_anchors.clear();
+        if lost > 0 {
+            self.toast(
+                format!(
+                    "地址已按新基址重算：{moved} 个可用，{lost} 个失效（模块换了或变小了，列表里标红）。"
+                ),
+                ToastKind::Warn,
+            );
+        } else if moved > 0 {
+            self.toast(
+                format!("地址已按新基址重算：{moved} 个全部可用。"),
+                ToastKind::Success,
+            );
+        }
+    }
+
     pub fn attach_handle(&mut self, handle: Arc<ProcessHandle>) {
         if let Some(job) = &self.scan_job {
             job.cancel.store(true, Ordering::Relaxed);
@@ -879,10 +944,16 @@ impl ZeroApp {
         self.scan_job = None;
         self.scan_phase = ScanPhase::Idle;
         let same = self.attached_pid == Some(handle.pid);
+        // Rows restored from a workspace carry a module anchor, not a live
+        // address: they must survive this clear and be moved afterwards. Rows
+        // belonging to the *same* process are kept as they are.
+        let anchored: Vec<Entry> = std::mem::take(&mut self.entries)
+            .into_iter()
+            .filter(|entry| self.entry_anchors.contains_key(&entry.id))
+            .collect();
         if !same {
             self.hits.clear();
             self.hit_history.clear();
-            self.entries.clear();
             self.selected_hit = None;
             self.mem_loaded = false;
             self.mem_data.clear();
@@ -898,6 +969,7 @@ impl ZeroApp {
             self.heat_on = false;
             self.heat_last = None;
         }
+        self.entries = anchored;
         self.process_name = handle.name.clone();
         self.process_arch = if handle.is_64bit { "x64" } else { "x86" }.to_string();
         self.process_writable = handle.writable;
@@ -915,6 +987,7 @@ impl ZeroApp {
         if self.ptr_stale {
             self.rebase_ptr_paths(&handle);
         }
+        self.rebase_entries(&handle);
         self.sync_freeze();
         self.toast(
             format!("已连接 {}（PID {}）", self.process_name, self.attached_pid.unwrap_or(0)),
@@ -1259,6 +1332,10 @@ impl ZeroApp {
 
     pub fn remove_entry(&mut self, id: u64) {
         self.entries.retain(|e| e.id != id);
+        // A pending anchor for a row that no longer exists would be applied to
+        // whatever id gets reused next; drop it with the row.
+        self.entry_anchors.remove(&id);
+        self.stale_entries.remove(&id);
         self.sync_freeze();
         self.toast("已移除地址。", ToastKind::Info);
     }
@@ -2499,12 +2576,31 @@ impl ZeroApp {
         let entries = self
             .entries
             .iter()
-            .map(|entry| session::SavedEntry {
-                description: entry.desc.clone(),
-                address: entry.address,
-                vtype: vtype_tag(entry.vtype).to_string(),
-                frozen: entry.active,
-                value_text: entry.value_text.clone(),
+            .map(|entry| {
+                // Prefer the anchor recorded when the row was restored; fall
+                // back to looking the address up in the live module table.
+                // Without one the row cannot be re-pointed after a restart.
+                let anchor = self
+                    .entry_anchors
+                    .get(&entry.id)
+                    .cloned()
+                    .or_else(|| {
+                        self.process
+                            .as_ref()
+                            .and_then(|handle| rebase::anchor(entry.address, &handle.modules()))
+                    });
+                session::SavedEntry {
+                    description: entry.desc.clone(),
+                    address: entry.address,
+                    vtype: vtype_tag(entry.vtype).to_string(),
+                    frozen: entry.active,
+                    value_text: entry.value_text.clone(),
+                    module: anchor
+                        .as_ref()
+                        .map(|a| a.module.clone())
+                        .unwrap_or_default(),
+                    module_offset: anchor.as_ref().map(|a| a.offset).unwrap_or(0),
+                }
             })
             .collect();
         let patches = self
@@ -2573,6 +2669,20 @@ impl ZeroApp {
             aob_text: self.aob_text.clone(),
             scan_value: self.scan_value.clone(),
             last_tab: tab_tag(self.tab).to_string(),
+            // Recorded so the next launch can offer "reconnect to <game>" and
+            // knows which module table the saved addresses were anchored to.
+            process_name: self.process_name.clone(),
+            modules: self
+                .process
+                .as_ref()
+                .map(|handle| {
+                    handle
+                        .modules()
+                        .iter()
+                        .map(session::SavedModule::from_module_info)
+                        .collect()
+                })
+                .unwrap_or_default(),
         }
     }
 
@@ -2603,6 +2713,17 @@ impl ZeroApp {
         }
         for (index, saved) in workspace.entries.iter().enumerate() {
             let id = self.next_entry_id + index as u64;
+            // Remember where the row sat when it was saved; attach_handle uses
+            // this to move it onto the new process's module table.
+            if !saved.module.is_empty() {
+                self.entry_anchors.insert(
+                    id,
+                    rebase::Anchored {
+                        module: saved.module.clone(),
+                        offset: saved.module_offset,
+                    },
+                );
+            }
             self.entries.push(Entry {
                 id,
                 desc: saved.description.clone(),
@@ -2689,6 +2810,11 @@ impl ZeroApp {
                 self.ptr_phase = ScanPhase::Idle;
                 self.ptr_stale = true;
             }
+        }
+        // Remember which program these addresses came from, so the picker can
+        // put it on top and say how long ago it was last used.
+        if !workspace.process_name.is_empty() {
+            self.last_process_name = workspace.process_name.clone();
         }
         workspace.active_patches()
     }
@@ -3381,8 +3507,14 @@ impl ZeroApp {
 }
 
 /// Where the workspace lives: next to the executable, so a portable copy of
-/// Zero carries its own state.
+/// Zero carries its own state. ZERO_WORKSPACE overrides it, which is how a test
+/// can prove a full reconnect round-trip without touching a real player's file.
 fn workspace_path() -> String {
+    if let Ok(path) = std::env::var("ZERO_WORKSPACE") {
+        if !path.trim().is_empty() {
+            return path;
+        }
+    }
     std::env::current_exe()
         .ok()
         .and_then(|exe| exe.parent().map(|dir| dir.join("zero-workspace.json")))
